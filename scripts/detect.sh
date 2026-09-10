@@ -18,7 +18,7 @@ read -r -a KNOWN <<< "${COORD_KNOWN:-codex claude pi opencode crush goose devin 
 
 exec_recipe() {
   case "$1" in
-    codex)  echo 'codex|exec|-C|__CWD__|-s|danger-full-access|-a|never|__PROMPT__' ;;
+    codex)  echo 'codex|exec|-C|__CWD__|--dangerously-bypass-approvals-and-sandbox|__PROMPT__' ;;
     claude) echo 'claude|-p|__PROMPT__' ;;
     pi)     echo 'pi|__PROMPT__' ;;
     *) return 1 ;;
@@ -27,7 +27,7 @@ exec_recipe() {
 
 resume_recipe() {
   case "$1" in
-    codex)  echo 'codex|exec|resume|__SESSION__|__BATCH__' ;;
+    codex)  echo 'codex|exec|resume|--dangerously-bypass-approvals-and-sandbox|__SESSION__|__BATCH__' ;;
     claude) echo 'claude|-p|--resume|__SESSION__|__BATCH__' ;;
     pi)     echo 'pi|--resume|__SESSION__|__BATCH__' ;;
     *) return 1 ;;
