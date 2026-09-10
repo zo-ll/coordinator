@@ -45,8 +45,21 @@ printf 'SESSION %s harness=%s repo=%s\n' "$session" "$harness" "$repo"
 
 if [ "$start_relay" = 1 ]; then
   mkdir -p "$COORD_ROOT"
-  COORD_SESSION="$session" setsid "$HERE/relay.sh" >>"$COORD_ROOT/relay.log" 2>&1 &
-  pid="$!"
-  printf '%s\n' "$pid" > "$COORD_ROOT/relay.pid"
-  printf 'RELAY pid=%s\n' "$pid"
+  if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+    # Run the relay in a visible window so the coordinator's resumed turns show.
+    rcmd="COORD_SESSION=$(printf '%q' "$session") $(printf '%q' "$HERE/relay.sh")"
+    if tmux new-window -d -n coord-relay -c "$repo" "$rcmd" 2>/dev/null; then
+      printf 'RELAY window=coord-relay session=%s\n' "$session"
+    else
+      COORD_SESSION="$session" setsid "$HERE/relay.sh" >>"$COORD_ROOT/relay.log" 2>&1 &
+      pid="$!"
+      printf '%s\n' "$pid" > "$COORD_ROOT/relay.pid"
+      printf 'RELAY pid=%s\n' "$pid"
+    fi
+  else
+    COORD_SESSION="$session" setsid "$HERE/relay.sh" >>"$COORD_ROOT/relay.log" 2>&1 &
+    pid="$!"
+    printf '%s\n' "$pid" > "$COORD_ROOT/relay.pid"
+    printf 'RELAY pid=%s\n' "$pid"
+  fi
 fi

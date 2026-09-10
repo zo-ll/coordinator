@@ -61,7 +61,7 @@ launch() {
     [ -f "$a" ] || continue
     # shellcheck source=/dev/null
     . "$a"
-    if ADAPTER_NAME="$role" adapter_launch "$wt" "$log" "$@"; then return 0; fi
+    if ADAPTER_NAME="${role}${slice:+.$slice}" adapter_launch "$wt" "$log" "$@"; then return 0; fi
   done
   ( cd "$wt" && setsid "$@" >>"$log" 2>&1 & echo $! )
 }
