@@ -52,7 +52,9 @@ assert "$(PATH="$TMP/bin" "$DETECT")" \
 out="$(PATH="$TMP/bin" "$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
   "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge tracker=local adapters=none"
-assert "$(printf '%s\n' "$out" | sed -n 2p)" "ASK models autonomy"
+assert "$(printf '%s\n' "$out" | sed -n 2p)" "ASK"
+printf '%s\n' "$out" | grep -qx '  critic.model=' || { echo "  ASK missing critic.model"; exit 1; }
+if printf '%s\n' "$out" | grep -q '  critic.harness='; then echo "  roles should be forced"; exit 1; fi
 PATH="$TMP/bin" "$APPLY" --accept >/dev/null
 assert "$("$CFG" get "$COORD_CONFIG" critic.harness)" "codex"
 assert "$("$CFG" get "$COORD_CONFIG" lane.default.harness)" "codex"
@@ -72,8 +74,8 @@ PATH="$TMP/bin" "$DETECT" >/dev/null
 out="$(PATH="$TMP/bin" "$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
   "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge tracker=local adapters=none"
-case "$(printf '%s\n' "$out" | sed -n 2p)" in
-  *roles*) ;;
+case "$(printf '%s\n' "$out" | tail -n +2)" in
+  *critic.harness=codex*lane.strong.harness=claude*) ;;
   *) echo "  multi-harness ASK missing roles"; exit 1 ;;
 esac
 

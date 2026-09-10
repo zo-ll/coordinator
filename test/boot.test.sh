@@ -31,7 +31,10 @@ EOF
 out="$("$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
   "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge tracker=local adapters=none"
-assert "$(printf '%s\n' "$out" | sed -n 2p)" "ASK models autonomy"
+assert "$(printf '%s\n' "$out" | sed -n 2p)" "ASK"
+printf '%s\n' "$out" | grep -qx '  critic.model=' || { echo "  ASK missing critic.model"; exit 1; }
+printf '%s\n' "$out" | grep -qx '  autonomy=approve-merge' || { echo "  ASK missing autonomy"; exit 1; }
+if printf '%s\n' "$out" | grep -q '  critic.harness='; then echo "  roles should be forced"; exit 1; fi
 
 # apply with answers
 assert "$("$APPLY" --answers 'autonomy=auto-merge critic.model=gpt-5')" "OK config=$COORD_CONFIG"
@@ -62,10 +65,10 @@ rm -f "$COORD_CONFIG"
 out="$("$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
   "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge tracker=local adapters=none"
-ask="$(printf '%s\n' "$out" | sed -n 2p)"
-case "$ask" in
-  *roles*adapters*tracker*) ;;
-  *) echo "  multi-harness ASK missing fields: $ask"; exit 1 ;;
-esac
+block="$(printf '%s\n' "$out" | tail -n +2)"
+case "$block" in *critic.harness=codex*) ;; *) echo "  ASK missing roles"; exit 1 ;; esac
+case "$block" in *lane.strong.harness=claude*) ;; *) echo "  ASK missing lane.strong"; exit 1 ;; esac
+case "$block" in *adapters=none*) ;; *) echo "  ASK missing adapters"; exit 1 ;; esac
+case "$block" in *tracker=local*) ;; *) echo "  ASK missing tracker"; exit 1 ;; esac
 
 echo "  boot ok"

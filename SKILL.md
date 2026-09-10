@@ -20,11 +20,17 @@ one-line outputs.
 ## Boot
 
 1. `scripts/detect.sh` → `DETECT …`; writes `env.conf`.
-2. `scripts/plan.sh` → `PROPOSE …` and `ASK …`.
-3. If `ASK` is non-empty, ask the user ONLY those fields, then
-   `scripts/apply.sh --answers "critic.model=… autonomy=…"`.
-   If `ASK` is empty, `scripts/apply.sh --accept`.
-   It prints `OK` or `FAIL <field>: <reason>`; on `FAIL`, stop and report.
+2. `scripts/plan.sh` → a `PROPOSE` line and an `ASK` block of `key=value` lines.
+3. If the `ASK` block has entries, you MUST pose a real question and WAIT for the
+   user's reply — never just list the fields:
+   - Present each `key` with its proposed `value`. An empty model value means
+     "use that harness's default model"; the user must confirm it.
+   - Let the user accept all defaults or change any key.
+   Then:
+   - accepted everything → `scripts/apply.sh --accept`
+   - changed fields → `scripts/apply.sh --answers "key=value key=value"`
+   If the `ASK` block is empty, run `scripts/apply.sh --accept`.
+   It prints `OK config=…` or `FAIL <field>: <reason>`; on `FAIL`, stop.
 4. `scripts/coord.sh` → `SESSION …` + `RELAY …`; starts the relay detached.
 
 ## Slice lifecycle
