@@ -21,6 +21,17 @@ harness is enough.
 - `agents/` — role preambles; `adapters/` — optional launch overrides.
 - `SKILL.md` — the dispatcher an agent loads.
 
+## Install
+
+```sh
+bin/install.sh              # symlink this repo as <harness>/coordinator
+bin/install.sh --uninstall  # remove those symlinks
+```
+
+The repo root is the skill, so it is symlinked as a directory into every harness
+skill dir found on the machine (pi, `.agents`, claude, codex, opencode, …).
+Edits and `git pull` stay live.
+
 ## Tests
 
 ```sh
