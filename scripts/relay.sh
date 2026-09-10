@@ -29,22 +29,35 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-config() {
-  local key="$1" envval="$2" v
-  if [ -n "$envval" ]; then printf '%s' "$envval"; return 0; fi
+cfg_get() { "$HERE/cfg.sh" get "$1" "$2" 2>/dev/null || true; }
+
+resume_recipe() {
+  [ -n "${COORD_RESUME:-}" ] && { printf '%s' "$COORD_RESUME"; return 0; }
   local file="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
-  [ -f "$file" ] || return 1
-  "$HERE/cfg.sh" get "$file" "$key"
+  local v; v="$(cfg_get "$file" relay.resume)"
+  [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+  local envconf="${COORD_ENV_CONF:-${COORD_HOME:-$HOME/.coordinator}/env.conf}"
+  local cur; cur="$(cfg_get "$envconf" current)"
+  [ -n "$cur" ] && cfg_get "$envconf" "harness.$cur.resume"
+}
+
+session_id() {
+  [ -n "${COORD_SESSION:-}" ] && { printf '%s' "$COORD_SESSION"; return 0; }
+  local file="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
+  local v; v="$(cfg_get "$file" relay.session)"
+  [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+  local sf="$PWD/.coordinator/session"
+  [ -f "$sf" ] && cat "$sf"
 }
 
 resume() { # pointer
-  local pointer="$1" recipe session i
-  recipe="$(config relay.resume "${COORD_RESUME:-}")" || {
-    echo "relay: no relay.resume recipe (set COORD_RESUME or config)" >&2
+  local pointer="$1" recipe session i argv
+  recipe="$(resume_recipe)"
+  [ -n "$recipe" ] || {
+    echo "relay: no relay.resume recipe (set COORD_RESUME, config, or env.conf)" >&2
     return 1
   }
-  session="$(config relay.session "${COORD_SESSION:-}")" || session=""
-  local argv
+  session="$(session_id)"
   IFS='|' read -r -a argv <<< "$recipe"
   for i in "${!argv[@]}"; do
     argv[$i]="${argv[$i]//__BATCH__/$pointer}"
