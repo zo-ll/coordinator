@@ -2,20 +2,30 @@
 
 A harness-agnostic, script-driven, barebones multi-agent orchestration protocol.
 
-**Status: design phase — no implementation yet. See [SPEC.md](SPEC.md).**
+[SPEC.md](SPEC.md) is the design; the implementation lives in `scripts/` and is
+entirely **bash** — no `tmux`, `python`, or `node` required. One installed
+harness is enough.
 
-The protocol decomposes a goal into small vertical slices, runs one worker per
-slice on an isolated git worktree, has an independent critic review each
-survivor (producer-severed: the critic never sees the worker's framing), and
-merges only after a review pass bound to an exact commit plus the user's
-approval.
+## How it works
 
-The coordinator itself is a thin dispatcher over a set of **bash** scripts.
-Finished work is always a file; a worker enqueues a ping into an ordered queue,
-and a single relay consumes the queue and resumes the coordinator's session.
-It runs on any single installed harness (Codex, Claude, pi, …) with **no
-`tmux`, no `python`, and no `node` required**.
+- `scripts/detect.sh` / `plan.sh` / `apply.sh` — boot: detect the environment,
+  propose a config, ask only what detection cannot decide, validate, write.
+- `scripts/queue.sh` + `finish.sh` — finished work is a recovery marker plus an
+  ordered, de-duplicated ping.
+- `scripts/relay.sh` — the serial consumer: batches everything pending and
+  resumes the coordinator session via a config-driven command (`wake`).
+- `scripts/state.sh` — the slice ledger; `render` writes `COORDINATION.md`.
+- `scripts/worktree.sh`, `invoke.sh`, `spawn.sh` — dispatch a role detached.
+- `scripts/merge.sh` — HEAD-bound, approval-gated merge.
+- `scripts/coord.sh` — launcher: pins the session id and starts the relay.
+- `agents/` — role preambles; `adapters/` — optional launch overrides.
+- `SKILL.md` — the dispatcher an agent loads.
 
-This repository was split out of [zo-ll/skills](https://github.com/zo-ll/skills)
-so the flow can evolve on its own. The earlier implementation still exists in
-that repository's history.
+## Tests
+
+```sh
+test/run.sh
+```
+
+Each `test/*.test.sh` runs in its own temp dir and asserts on stdout, exit
+status, and resulting files. No network, no real agents.

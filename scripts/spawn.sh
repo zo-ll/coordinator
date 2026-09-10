@@ -15,6 +15,7 @@ INVOKE="$HERE/invoke.sh"
 STATE="$HERE/state.sh"
 CONFIG="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
 COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
+adapters_dir="${COORD_ADAPTERS:-$HERE/../adapters}"
 
 role=""; prompt=""; wt=""; slice=""
 while [ $# -gt 0 ]; do
@@ -48,7 +49,24 @@ logdir="$COORD_ROOT/log"
 mkdir -p "$logdir"
 log="$logdir/$role${slice:+.$slice}.log"
 
-pid="$( cd "$wt" && setsid "${argv[@]}" >>"$log" 2>&1 & echo $! )"
+launch() {
+  local wt="$1" log="$2"
+  shift 2
+  local adapters name a
+  adapters="$("$CFG" get "$CONFIG" adapters 2>/dev/null || true)"
+  for name in ${adapters//,/ }; do
+    [ -z "$name" ] && continue
+    [ "$name" = "none" ] && continue
+    a="$adapters_dir/$name.sh"
+    [ -f "$a" ] || continue
+    # shellcheck source=/dev/null
+    . "$a"
+    if ADAPTER_NAME="$role" adapter_launch "$wt" "$log" "$@"; then return 0; fi
+  done
+  ( cd "$wt" && setsid "$@" >>"$log" 2>&1 & echo $! )
+}
+
+pid="$(launch "$wt" "$log" "${argv[@]}")"
 
 if [ -n "$slice" ]; then
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
