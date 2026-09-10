@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # coord.sh: records the session id and starts/kills the relay.
 set -euo pipefail
-unset TMUX   # force the detached relay path
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COORD="$HERE/../scripts/coord.sh"

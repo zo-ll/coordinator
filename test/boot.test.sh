@@ -64,11 +64,11 @@ EOF
 rm -f "$COORD_CONFIG"
 out="$("$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
-  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge tracker=local adapters=tmux"
+  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge tracker=local adapters=none"
 block="$(printf '%s\n' "$out" | tail -n +2)"
 case "$block" in *critic.harness=codex*) ;; *) echo "  ASK missing roles"; exit 1 ;; esac
 case "$block" in *lane.strong.harness=claude*) ;; *) echo "  ASK missing lane.strong"; exit 1 ;; esac
-case "$block" in *adapters=tmux*) ;; *) echo "  ASK missing adapters"; exit 1 ;; esac
+case "$block" in *adapters=none*) ;; *) echo "  ASK missing adapters"; exit 1 ;; esac
 case "$block" in *tracker=local*) ;; *) echo "  ASK missing tracker"; exit 1 ;; esac
 
 echo "  boot ok"

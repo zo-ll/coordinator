@@ -65,11 +65,9 @@ if [ -n "$lane_strong" ]; then
   "$CFG" set "$PROPOSAL" lane.strong.harness "$lane_strong"
   "$CFG" set "$PROPOSAL" lane.strong.model ""
 fi
-adapter_default=none
-[ "$tmux" = 1 ] && adapter_default=tmux
 "$CFG" set "$PROPOSAL" autonomy approve-merge
 "$CFG" set "$PROPOSAL" tracker local
-"$CFG" set "$PROPOSAL" adapters "$adapter_default"
+"$CFG" set "$PROPOSAL" adapters none
 
 # ASK block: concrete keys with proposed values, so the coordinator can present
 # a real question. Empty model value = "harness default" (the user must confirm).
@@ -81,10 +79,10 @@ fi
 ask+=("critic.model=" "researcher.model=" "lane.default.model=")
 [ -n "$lane_strong" ] && ask+=("lane.strong.model=")
 ask+=("autonomy=approve-merge")
-[ "$tmux" = 1 ] && ask+=("adapters=$adapter_default")
+[ "$tmux" = 1 ] && ask+=("adapters=none")
 [ "$gh" = 1 ] && ask+=("tracker=local")
 
-printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=approve-merge tracker=local adapters=%s\n' \
-  "$critic" "$researcher" "$lane_default" "${lane_strong:-none}" "$adapter_default"
+printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=approve-merge tracker=local adapters=none\n' \
+  "$critic" "$researcher" "$lane_default" "${lane_strong:-none}"
 printf 'ASK\n'
 for l in "${ask[@]}"; do printf '  %s\n' "$l"; done
