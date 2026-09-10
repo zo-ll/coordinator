@@ -46,8 +46,9 @@ session_id() {
   local file="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
   local v; v="$(cfg_get "$file" relay.session)"
   [ -n "$v" ] && { printf '%s' "$v"; return 0; }
-  local sf="$PWD/.coordinator/session"
-  [ -f "$sf" ] && cat "$sf"
+  local dir; dir="$(dirname "$file")"
+  [ -f "$dir/session" ] && { cat "$dir/session"; return 0; }
+  [ -f "$PWD/.coordinator/session" ] && cat "$PWD/.coordinator/session"
 }
 
 resume() { # pointer
