@@ -99,6 +99,9 @@ supervision and MUST NOT change delivery, the finish protocol, or routing.
   (`git add -A`, including new files) and NEVER commit or push; critics never
   commit. The coordinator authors every commit with the user's git identity on
   an approved PASS, then merges and pushes.
+- Workers run with FULL permissions (each harness's native bypass flag is in
+  its exec recipe). The worktree plus the brief confine the worker; the
+  critic's reviewed-state binding and the approval-gated merge are the gate.
 - Merge only after a PASS bound to the exact reviewed worktree state plus
   recorded user approval.
 - Corrections go to the SAME worker; a new round uses a new slug.

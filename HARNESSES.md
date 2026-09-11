@@ -11,6 +11,10 @@ permission model, loop quirks, and a verdict. Updated as runs complete.
 - Review is producer-severed (critic sees only diff + criteria), reviewed-state
   binding (`git diff HEAD | sha256sum`), approval-gated merge, coordinator
   authors commits (workers only stage).
+- **Workers run with full permissions** (per-harness native bypass flag in the
+  exec recipe): the worktree + the brief confine the worker; the gate is the
+  critic review and the approval-gated coordinator merge — not worker
+  permissions.
 - Per-harness differences below are **config data** (`env.conf` recipes +
   discovery), never code forks — one core, four shells.
 

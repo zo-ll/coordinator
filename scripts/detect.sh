@@ -21,7 +21,7 @@ exec_recipe() {
     codex)  echo 'codex|exec|-C|__CWD__|--dangerously-bypass-approvals-and-sandbox|__PROMPT__' ;;
     claude) echo 'claude|-p|--dangerously-skip-permissions|__PROMPT__' ;;
     pi)     echo 'pi|__PROMPT__' ;;
-    opencode) echo 'opencode|run|__PROMPT__' ;;
+    opencode) echo 'opencode|run|--auto|__PROMPT__' ;;
     *) return 1 ;;
   esac
 }
