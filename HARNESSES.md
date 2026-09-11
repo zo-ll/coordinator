@@ -137,12 +137,24 @@ coordinator acts in its TUI rather than via relay wake; a future fix is an
 
 ---
 
-## pi  ⏳ pending
+## pi  ✅ full loop completed
 
-_Identity_: `$PI_SESSION_ID`; can also pin at launch with `--session-id`.
-_Wake_: `pi --resume <id>`.
+_Identity_: `$PI_SESSION_ID` exported into the session — `coord.sh` resolves
+it with NO discovery logic needed (`SESSION … source=pi-env`). Also pins at
+launch via `--session-id` if ever wanted.
 
-pencil: pending run
+_Skill surfacing_: pi's native skill system — the coordinator skill is in
+`~/.pi/agent/skills/coordinator` and loaded automatically (the relay log even
+shows `<skill name="coordinator" …>` rendering in the TUI).
+
+_Wake_: `pi --resume <id>` — executed fine (a pi turn rendered from the
+relay); the loop completed. No permission bypass needed — pi has none to
+configure, consistent with full-permission workers.
+
+_Loop_: ONE slice (`todo-cli`, the whole mission), staged work, critic pass
+with state hash, approval recorded, `[coord]` commit + merge on main;
+`test.sh` present. The claude-settings hygiene commit landed too (harmless
+on pi — a repo file).
 
 ---
 
@@ -150,8 +162,9 @@ pencil: pending run
 
 | | codex | claude | opencode | pi |
 |---|---|---|---|---|
-| skill surface | AGENTS.md / skills dir | `/coordinator` | config instructions | pi skills |
-| session discovery | newest rollout | newest project jsonl | manual `--session` | `PI_SESSION_ID` |
-| wake | `codex queue` (live push) | resume (headless, invisible) | `run --session` → server error; in-session instead | `--resume` — pending |
-| git perms | `-s workspace-write` / trust | `--dangerously-skip-permissions` + repo settings | `--auto` (workers + resume) | pending |
-| loop quirks | slug suffixing, profile PATH leak | one-slice; missing-finish brief; headless | self-discovered `--session`; server-backed sessions | pending |
+| skill surface | AGENTS.md / skills dir | `/coordinator` | config instructions | native skill list |
+| session discovery | newest rollout | newest project jsonl | manual `--session` (self-discovered) | `PI_SESSION_ID` env |
+| wake | `codex queue` (live push) | resume (headless, invisible) | `run --session` → server error; in-session instead | `--resume` ✅ |
+| git perms | `-s workspace-write` / trust | `--dangerously-skip-permissions` + repo settings | `--auto` (workers + resume) | none needed |
+| loop quirks | slug suffixing, profile PATH leak | one-slice; missing-finish brief; headless | server-backed sessions | one-slice; simplest setup |
+| loop result | ✅ 3 slices | ✅ 1 slice | ✅ 3 slices (in-session) | ✅ 1 slice |
