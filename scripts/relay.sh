@@ -2,11 +2,20 @@
 # Serial queue consumer: the only thing that turns workers' pings into a
 # coordinator turn. No daemon framework, no tmux, no polling of a live session.
 #
-#   relay.sh [--once] [--interval N]
+#   relay.sh [--once] [--interval N] [--max-attempts N] [--backoff N]
 #
 # Loop: wait for the queue to be non-empty; claim every pending event, in order,
 # into one batch file; resume the coordinator with a one-line pointer to it; wait
 # for the turn to exit; ack the batch. One turn at a time.
+#
+# Delivery is bounded: a failed resume is retried with exponential backoff up to
+# --max-attempts. On exhaustion the batch is returned to the queue and the relay
+# exits nonzero — one clear line, never a silent spin. Fix the resume recipe and
+# restart the relay to drain what was returned.
+#
+# Exactly one relay per COORD_ROOT: a non-blocking flock guards the loop, and a
+# fresh relay.pid is written (self-cleaned on exit) so a stale pid cannot point
+# at a dead process.
 #
 # The resume command is config data (never eval'd):
 #   $COORD_CONFIG (default <cwd>/.coordinator/config.conf) keys:
@@ -21,10 +30,14 @@ QUEUE="$HERE/queue.sh"
 
 once=0
 interval="${RELAY_INTERVAL:-1}"
+max_attempts="${RELAY_MAX_ATTEMPTS:-5}"
+backoff="${RELAY_BACKOFF:-2}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --once)     once=1; shift ;;
-    --interval) interval="$2"; shift 2 ;;
+    --once)         once=1; shift ;;
+    --interval)     interval="$2"; shift 2 ;;
+    --max-attempts) max_attempts="$2"; shift 2 ;;
+    --backoff)      backoff="$2"; shift 2 ;;
     *) echo "relay.sh: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -67,19 +80,42 @@ resume() { # pointer
   "${argv[@]}"
 }
 
-batchdir="$COORD_ROOT/batch"
-mkdir -p "$batchdir"
+mkdir -p "$COORD_ROOT" "$COORD_ROOT/batch"
+
+# single relay: hold the lock for the process lifetime
+exec 8>"$COORD_ROOT/relay.lock"
+if ! flock -n 8; then
+  echo "relay: another relay already holds $COORD_ROOT/relay.lock; refusing to run two" >&2
+  exit 1
+fi
+printf '%s\n' "$$" > "$COORD_ROOT/relay.pid"
+trap 'rm -f "$COORD_ROOT/relay.pid"' EXIT
+
+deliver() { # batch: retry resume with backoff, ack on success, give up loudly
+  local batch="$1" attempt=0 wait="$backoff"
+  while :; do
+    attempt=$(( attempt + 1 ))
+    if resume "WAKE batch=$batch"; then
+      "$QUEUE" ack
+      return 0
+    fi
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      "$QUEUE" nack
+      echo "relay: resume failed $max_attempts times for $batch; returned the events to the queue and stopped (fix the resume recipe, then restart the relay)" >&2
+      return 1
+    fi
+    echo "relay: resume failed (attempt $attempt/$max_attempts), retrying in ${wait}s" >&2
+    sleep "$wait"
+    wait=$(( wait * 2 ))
+    [ "$wait" -le 60 ] || wait=60
+  done
+}
 
 while :; do
   if "$QUEUE" pending; then
-    batch="$batchdir/$(date +%s%N).$$.txt"
+    batch="$COORD_ROOT/batch/$(date +%s%N).$$.txt"
     if "$QUEUE" pop-batch "$batch" >/dev/null; then
-      if resume "WAKE batch=$batch"; then
-        "$QUEUE" ack
-      else
-        echo "relay: resume failed, returning batch to queue" >&2
-        "$QUEUE" nack
-      fi
+      deliver "$batch" || exit 1
       if [ "$once" = 1 ]; then exit 0; fi
     fi
   else

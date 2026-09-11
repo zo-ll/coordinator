@@ -43,4 +43,61 @@ assert "$(grep -c '^EVENT ' "$batch")" "20"
 assert "$("$QUEUE" list | wc -l)" "0"
 assert "$(ls "$COORD_ROOT/queue/.done" | wc -l)" "20"
 
+# --- permanent failure: bounded retries, loud give-up, events kept in .inflight
+cat > "$TMP/fail-resume" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$TMP/fail-resume"
+export COORD_RESUME="$TMP/fail-resume"
+
+"$QUEUE" enqueue f1 'DONE f1: done' >/dev/null
+"$QUEUE" enqueue f2 'DONE f2: done' >/dev/null
+if "$RELAY" --once --max-attempts 3 --backoff 0 >/dev/null 2>"$TMP/err"; then
+  echo "  relay should have given up"; exit 1
+fi
+grep -q 'attempt 1/3' "$TMP/err" || { echo "  no backoff retry:"; cat "$TMP/err"; exit 1; }
+grep -q 'returned the events to the queue and stopped' "$TMP/err" || { echo "  no give-up line:"; cat "$TMP/err"; exit 1; }
+assert "$("$QUEUE" depth)" "QUEUE pending=2 inflight=0 done=20"
+[ ! -e "$COORD_ROOT/relay.pid" ] || { echo "  pid not cleaned on exit"; exit 1; }
+
+# --- transient failure: retried until it succeeds, then acked
+: > "$RELAY_LOG"
+cat > "$TMP/flaky-resume" <<EOF
+#!/usr/bin/env bash
+n=\$(cat "$TMP/count" 2>/dev/null || echo 0)
+n=\$((n + 1)); echo \$n > "$TMP/count"
+[ \$n -ge 2 ] || exit 1
+printf '%s\n' "\$*" >> "$RELAY_LOG"
+EOF
+chmod +x "$TMP/flaky-resume"
+export COORD_RESUME="$TMP/flaky-resume"
+rm -f "$TMP/count"
+
+"$QUEUE" enqueue tx1 'DONE t1: done' >/dev/null
+"$QUEUE" enqueue tx2 'DONE t2: done' >/dev/null
+"$RELAY" --once --max-attempts 5 --backoff 0
+assert "$(wc -l < "$RELAY_LOG" | tr -d ' ')" "1"
+assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=24"
+
+# --- a second relay refuses to run while one holds the lock
+"$QUEUE" enqueue u1 'DONE u1: done' >/dev/null
+"$QUEUE" enqueue u2 'DONE u2: done' >/dev/null
+exec 9>"$COORD_ROOT/relay.lock"
+flock -n 9 || { echo "  test lock failed"; exit 1; }
+if "$RELAY" --once >/dev/null 2>"$TMP/err"; then
+  echo "  second relay should have refused"; exit 1
+fi
+grep -q 'another relay already holds' "$TMP/err" || { echo "  no refusal line:"; cat "$TMP/err"; exit 1; }
+assert "$("$QUEUE" depth)" "QUEUE pending=2 inflight=0 done=24"
+exec 9>&-
+
+# --- requeue the give-up leftovers (f1/f2 in .inflight) with queue.sh nack
+"$QUEUE" nack
+assert "$("$QUEUE" depth)" "QUEUE pending=2 inflight=0 done=24"
+
+# released lock lets a fresh relay run again; it drains everything
+"$RELAY" --once --interval 0.2
+assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=26"
+
 echo "  relay ok"
