@@ -2,7 +2,7 @@
 
 The coordinator skill only works on the author's machine. It hardwires `pi` as the coordinator, `tmux` for event delivery, a fixed pane layout (`personal:coordinator.0`), and pi's `subagent` extension. A user who has only Codex, or only Claude, or no `tmux` at all cannot run it: installing the skill reproduces an environment rather than installing a protocol. The relay's push delivery depends on a resident pane in a multiplexer, so there is no way to wake a coordinator that isn't sitting in tmux.
 
-There is also no way to confirm the loop works: its load-bearing correctness — atomic finish, ordered event delivery under concurrent workers, ledger transitions, HEAD-bound merge — is untested shell that fails silently.
+There is also no way to confirm the loop works: its load-bearing correctness — atomic finish, ordered event delivery under concurrent workers, ledger transitions, reviewed-state-bound merge — is untested shell that fails silently.
 
 ## Solution
 
@@ -51,11 +51,11 @@ Make the coordinator a barebones, environment-independent loop of **bash** scrip
 31. As a coordinator, I want each role's identity injected at spawn, so a harness without per-invocation skill flags still gets the right role behavior.
 32. As a coordinator, I want each slice in its own worktree and branch, so parallel workers never collide.
 33. As a coordinator, I want to route on the event line and the structured verdict only, so I never read a worker's diff to form a quality judgment.
-34. As a coordinator, I want to require a fresh critic verdict for a behavior-changing post-review merge, so approval is always bound to the reviewed commit.
+34. As a coordinator, I want to require a fresh critic verdict for a behavior-changing post-review merge, so approval is always bound to the exact reviewed worktree state (workers only stage; there is no worker commit).
 35. As a coordinator, I want merges to require the user's approval by default, so autonomy is opt-in.
 36. As a coordinator, I want to record every state transition in a ledger, so the run is reconstructable.
 37. As a critic, I want to receive only the diff, acceptance criteria, and design reference, so my review is severed from the producer's framing.
-38. As a critic, I want to return a fixed verdict shape with a full reviewed commit hash, so the coordinator can bind approval to an exact HEAD.
+38. As a critic, I want to return a fixed verdict shape whose `head` is a hash of the exact reviewed state (`git diff HEAD | sha256sum`), so the coordinator can bind approval to that state, not to a worker-authored commit.
 39. As a researcher, I want to be dispatched only on demand, so research is not part of every run.
 40. As a maintainer, I want the config format hidden behind one reader, so the format can change without touching callers.
 41. As a maintainer, I want config parsed rather than shell-sourced, so a committed value cannot execute.
@@ -86,22 +86,22 @@ All access goes through `cfg.sh` (`get`/`set`/`keys`/`unset`). `get` parses with
 **Ping queue.** `${COORD_ROOT}/queue/`, ordered and append-only. Enqueue: write the line to a temp file, `rename` to `<seq>.<slug>.ping`, where `seq` comes from a small `flock`-guarded counter (Linux/WSL). Ordering is total; uniqueness is guaranteed; a retry reuses its slug and is de-duplicated by `seen/<slug>`. Ephemeral state lives under `COORD_ROOT` (default `/tmp/coordinator`), passed to roles in the brief.
 
 **Core CLI contracts** (fixed here because they encode decisions):
-- `finish.sh --event <slug> --role … --result … --head … --summary "…"` → writes the marker (`.scratch/status/<slug>.done`) **first**, then enqueues the ping; prints one line.
+- `finish.sh --event <slug> --role … --result … --head … --summary "…"` → writes the marker (`.scratch/status/<slug>.done`) **first**, then enqueues the ping; prints one line. Workers pass `--head -` (they have no commit); critics pass the reviewed-state hash.
 - `queue.sh enqueue <slug> <line> | list | pop-batch | done <slug>…` → queue primitives used by `finish.sh`, `relay.sh`, and `coord`.
 - `relay.sh` → long-lived serial consumer. Waits until the queue is non-empty (poll on the relay interval, or block on a FIFO). Takes all pending events in order, writes them to one batch file under `COORD_ROOT/batch/`, resumes the coordinator with a one-line pointer to that file, waits for the turn to exit, then moves the batch to `done/`. One turn at a time.
 - `state.sh` verbs: `add`, `ready`, `next`, `dispatch`, `review`, `verdict`, `merged`, `blocked`, `drop`, `list [--pids]`, `done`, `render`; each prints one short line; `done` exits 0 iff every slice is `merged` or `dropped`.
 - `spawn.sh --role <r> --prompt <brief> --worktree <dir> [--slice <id>]` → reads role/model from config, builds argv from the exec recipe, launches detached, records `state.sh dispatch`, prints one line.
-- `merge.sh <id>` → verifies the verdict's `head` equals the candidate HEAD, merges in dependency order, records `state.sh merged`; refuses without recorded user approval.
+- `merge.sh <id>` → recomputes the recorded reviewed-state hash from the worktree, refuses on any drift or unstaged/untracked (outside `.scratch/`) changes, authors the commit on the slice branch with the user's identity, merges in dependency order, pushes if `origin` exists, and records `state.sh merged`; refuses without recorded user approval.
 
-**Event flow.** Worker/critic finish → marker + enqueue. Relay batches and resumes the coordinator. Coordinator routes each event (`DONE` → dispatch critic; `VERDICT pass @ <head>` → record, wait for a user `approve <id>` event, `merge.sh`; `VERDICT handback` → correction brief to the same worker, new round slug). User decisions are enqueued via `coord approve|reject|msg <id>`, so the human is an ordinary producer.
+**Event flow.** Worker/critic finish → marker + enqueue. Relay batches and resumes the coordinator. Coordinator routes each event (`DONE` → dispatch critic; `VERDICT pass @ <state-hash>` → record, wait for a user `approve <id>` event, `merge.sh` (authors the commit, merges, pushes); `VERDICT handback` → correction brief to the same worker, new round slug). User decisions are enqueued via `coord approve|reject|msg <id>`, so the human is an ordinary producer.
 
 **Turn-start invariant.** The coordinator processes the batch file named in its resume pointer at the start of every turn. Because the relay claims the batch only after the turn exits, no event is lost or double-processed; the queue is the buffer and the relay is the serializer.
 
-**Ledger and dashboard.** `<repo>/.coordinator/ledger.tsv` is the machine state, owned by `state.sh` (the only parser; no `jq`/`awk` in the skill). Fields: `id | status | blockers | task | round | worktree | branch | pid | head | verdict | merge | goal` (goal last). `COORDINATION.md` becomes `state.sh render` output. The journal remains append-only history.
+**Ledger and dashboard.** `<repo>/.coordinator/ledger.tsv` is the machine state, owned by `state.sh` (the only parser; no `jq`/`awk` in the skill). Fields: `id | status | blockers | task | round | worktree | branch | pid | head | verdict | merge | goal` (goal last); `head` holds the reviewed-state hash for a pass. `COORDINATION.md` becomes `state.sh render` output. The journal remains append-only history.
 
 **Adapters (launch only).** `config.conf:adapters` lists enabled adapters (empty = core). Each `adapters/<name>.sh` defines `adapter_launch <argv> <cwd>` echoing a pid; `spawn.sh` sources enabled adapters in order, first handler wins, else core `setsid … &`. Adapters may add visibility/supervision and MUST NOT alter delivery, the finish protocol, routing, review, or merge. Harness resume is config data, not an adapter.
 
-**Hard rules retained in the skill text** (cannot be scripted): route on the event line and verdict only and never read a worker's diff; the critic is the only content reviewer; merge only after a recorded PASS on the exact HEAD plus a recorded user approval; corrections go to the same worker; one issue/worktree/branch per slice; the user's git identity only.
+**Hard rules retained in the skill text** (cannot be scripted): route on the event line and verdict only and never read a worker's diff; the critic is the only content reviewer; the coordinator is the only one that manages git — workers stage (`git add -A`) and never commit or push, critics never commit, and the coordinator authors every commit with the user's identity after an approved PASS, then merges; merge only after a recorded PASS on the exact reviewed state plus a recorded user approval; corrections go to the same worker; one issue/worktree/branch per slice; the user's git identity only.
 
 ## Testing Decisions
 

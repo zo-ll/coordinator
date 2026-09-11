@@ -40,7 +40,8 @@ one-line outputs.
 - Dispatch a worker:
   `scripts/spawn.sh --role worker --prompt <brief> --worktree <dir> --slice <id>`
 - Review: `scripts/spawn.sh --role critic --prompt <assignment> --worktree <dir>`
-- Close: after a `pass` bound to the exact HEAD and the user's approval,
+- Close: after a `pass` bound to the exact reviewed state (the critic's
+  `git diff HEAD | sha256sum` of the worktree) and the user's approval,
   `scripts/merge.sh --slice <id>`.
 
 ## The loop (the relay drives it; you own no loop)
@@ -49,8 +50,9 @@ The relay resumes this session with `WAKE batch=<path>`. At the start of every
 resumed turn, read the batch file and route each `EVENT`:
 
 - `DONE <task>: done` → write a review assignment; `spawn.sh --role critic`.
-- `VERDICT <task>: pass @ <head>` → `state.sh verdict`; ask the user; on approval
-  `merge.sh --slice <id>`.
+- `VERDICT <task>: pass @ <state-hash>` → `state.sh verdict`; ask the user; on
+  approval `merge.sh --slice <id>` (authors the commit with the user's
+  identity, merges, pushes).
 - `VERDICT <task>: handback` → write a correction brief; respawn the SAME
   worker with a new round slug.
 
@@ -77,7 +79,12 @@ supervision and MUST NOT change delivery, the finish protocol, or routing.
 ## Hard rules
 
 - Route on the event line and the verdict only; never read a worker's diff.
-- Merge only after a PASS bound to the exact HEAD plus recorded user approval.
+- The coordinator is the only one that manages git in the repo: workers stage
+  (`git add -A`, including new files) and NEVER commit or push; critics never
+  commit. The coordinator authors every commit with the user's git identity on
+  an approved PASS, then merges and pushes.
+- Merge only after a PASS bound to the exact reviewed worktree state plus
+  recorded user approval.
 - Corrections go to the SAME worker; a new round uses a new slug.
 - Observe only through `status.sh`/`state.sh`; never poll logs or processes.
 - One issue, one worktree, one branch per slice. The user's git identity only.
