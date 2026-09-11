@@ -43,6 +43,21 @@ printf '%s\n' "$session" > "$repo/.coordinator/session"
 
 printf 'SESSION %s harness=%s repo=%s\n' "$session" "$harness" "$repo"
 
+# repo hygiene: workers use `git add -A`, so keep finish markers out of the
+# index from the start. Ensure .gitignore ignores .scratch/ and commit it on
+# main (worktrees inherit it) with the user's identity — the first commit the
+# coordinator authors in the run.
+gi="$repo/.gitignore"
+if ! grep -qx '.scratch/' "$gi" 2>/dev/null; then
+  printf '.scratch/\n' >> "$gi"
+  if git -C "$repo" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    uemail="$(git -C "$repo" config user.email || echo coord@local)"
+    uname="$(git -C "$repo" config user.name || echo coordinator)"
+    git -C "$repo" add .gitignore
+    git -C "$repo" -c user.email="$uemail" -c user.name="$uname" commit -q -m "[coord] ignore .scratch markers"
+  fi
+fi
+
 if [ "$start_relay" = 1 ]; then
   mkdir -p "$COORD_ROOT"
   COORD_SESSION="$session" setsid "$HERE/relay.sh" >>"$COORD_ROOT/relay.log" 2>&1 &

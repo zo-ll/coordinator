@@ -36,6 +36,9 @@ one-line outputs.
 ## Slice lifecycle
 
 - Add: `scripts/state.sh add <id> "<goal>" [--blockers 1,2]`
+  The event slug IS the slice id: `<id>` for a worker round, `<id>.critic`
+  for a critic, `<id>.r<N>` for a re-review. Never decorate it further — one
+  brief, one slug per round; worktree.sh names branches from it.
 - Worktree: `scripts/worktree.sh --slice <id> --slug <slug>`
 - Dispatch a worker:
   `scripts/spawn.sh --role worker --prompt <brief> --worktree <dir> --slice <id>`
@@ -55,6 +58,10 @@ resumed turn, read the batch file and route each `EVENT`:
   identity, merges, pushes).
 - `VERDICT <task>: handback` → write a correction brief; respawn the SAME
   worker with a new round slug.
+
+Correlate `DONE <slug>` / `VERDICT <slug>` to the slice whose id is the slug's
+task prefix (before the first `.`). An event for an unknown slice id is a
+protocol error — surface it, do not guess.
 
 Then `state.sh ready`, dispatch each id from `state.sh next`, and when
 `state.sh done` exits 0, report what shipped and stop.

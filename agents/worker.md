@@ -12,3 +12,5 @@ contract: read it, follow it, stay in scope.
   the repo and say so.
 - Finish with the exact `finish.sh` command the brief gives: marker first,
   then the ping. Use `--head -` (you have no commit) and a one-line summary.
+- The finish.sh line is the contract: use exactly its `--event <slug>`, never
+  invent, edit, or rename the slug.
