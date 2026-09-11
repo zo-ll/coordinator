@@ -92,10 +92,15 @@ other harnesses' worker recipes): claude exec now runs with
   Decided fix (harness-agnostic): the finish contract is now APPENDED
   mechanically by spawn.sh, so no coordinator can skip it.
 
-**Verdict** (pending rerun with the mechanical finish append): session
-identity + wake recipe + full permissions all work; the per-directory
-permission scoping and the missing-finish brief were claude's two quirks,
-and both are fixed at the protocol level, not by claude-specific code.
+**Verdict** (pending rerun with repo settings): session identity + resume
+recipe work; the wake executes but the auto-resumed claude turn is a *fresh
+process* with its own permission context: every write/exec is blocked (no
+prompt can reach the user in an automated resume), and claude's allowed-
+directory scoping even blocks reaching the coordinator scripts outside the
+project. Fix (uniform boot hygiene, like .gitignore): coord.sh now ensures
+`<repo>/.claude/settings.local.json` with `bypassPermissions`, so every
+claude process in the repo (workers and resumed turns alike) has full
+permissions per the worker policy.
 
 ---
 

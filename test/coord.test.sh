@@ -29,7 +29,12 @@ assert "$(cat "$COORD_REPO/.coordinator/session")" "test-sess"
 # boot hygiene: .scratch/ ignored and committed by the coordinator
 [ -f "$COORD_REPO/.gitignore" ] || { echo "  .gitignore missing"; exit 1; }
 grep -qx '.scratch/' "$COORD_REPO/.gitignore" || { echo "  .gitignore lacks .scratch/"; exit 1; }
-git -C "$COORD_REPO" log -1 --format=%s | grep -q 'ignore .scratch markers' || { echo "  gitignore not committed"; exit 1; }
+git -C "$COORD_REPO" log --oneline | grep -q 'ignore .scratch markers' || { echo "  gitignore not committed"; exit 1; }
+
+# boot hygiene: claude project settings grant full permissions
+[ -f "$COORD_REPO/.claude/settings.local.json" ] || { echo "  claude settings missing"; exit 1; }
+grep -q 'bypassPermissions' "$COORD_REPO/.claude/settings.local.json" || { echo "  claude settings lack bypass"; exit 1; }
+git -C "$COORD_REPO" log --oneline | grep -q 'claude full permissions' || { echo "  claude settings not committed"; exit 1; }
 
 # starts a detached relay, pinning the resume recipe into config
 out="$("$COORD" --session s2)"
