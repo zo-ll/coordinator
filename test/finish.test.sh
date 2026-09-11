@@ -32,4 +32,11 @@ grep -q 'ROUND=2' "$WT/.scratch/status/s1.r2.done" || { echo "  round parse fail
 (cd "$WT" && "$FIN" --event s1.r2 --role worker --result done --head - --summary 'fixed again' >/dev/null)
 assert "$("$HERE/../scripts/queue.sh" list | wc -l)" "2"
 
+# invalid slugs (whitespace/tabs) are rejected before any file is written
+if (cd "$WT" && "$FIN" --event 'bad slug' --role worker --result done --head - --summary x >/dev/null 2>"$TMP/err"); then
+  echo "  whitespace slug allowed"; exit 1
+fi
+grep -q 'invalid --event slug' "$TMP/err" || { echo "  unclear slug error:"; cat "$TMP/err"; exit 1; }
+assert "$("$HERE/../scripts/queue.sh" list | wc -l)" "2"
+
 echo "  finish ok"

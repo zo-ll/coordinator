@@ -6,7 +6,7 @@ There is also no way to confirm the loop works: its load-bearing correctness —
 
 ## Solution
 
-Make the coordinator a barebones, environment-independent loop of **bash** scripts, with the LLM acting only as a thin dispatcher over them. No `python`, no `node`, no `tmux`.
+Make the coordinator a barebones, environment-independent loop of **bash** scripts, with the LLM acting only as a thin dispatcher over them. Runtime: bash 4.4+, standard Linux/WSL coreutils (`flock`, `setsid`, `sha256sum`, GNU `mv -T`), and `git`. No `python`, no `node`, no `tmux`.
 
 - **Single-harness, no-`tmux` is the default.** Every role (critic, researcher, workers) runs on whatever single harness is installed; the coordinator is the session where the skill was invoked. Producer-severance comes from a separate process with fresh, starved input — never harness diversity.
 - **Finished work is always a file** (a recovery marker plus a queued ping). Every role and every harness can write a file, so delivery never depends on a multiplexer or a live pane.
@@ -21,7 +21,7 @@ Make the coordinator a barebones, environment-independent loop of **bash** scrip
 1. As a developer with only Codex installed, I want to run the coordinator so that the critic, researcher, and every worker are all Codex, so I can use the protocol without installing another agent.
 2. As a developer with only Claude installed, I want the same loop to run entirely on Claude, so the protocol is not tied to one vendor.
 3. As a developer with no `tmux`, I want the loop to run barebones, so a terminal multiplexer is not a prerequisite.
-4. As a developer with no `python` or `node` on the box, I want the protocol to run on a POSIX shell and `git` alone, so there is no runtime dependency.
+4. As a developer with no `python` or `node` on the box, I want the protocol to run on bash (4.4+) and the stock Linux/WSL core utilities (`flock`, `setsid`, `sha256sum`, GNU `mv -T`), so there is no runtime dependency.
 5. As a developer with `tmux`, I want to optionally launch workers in visible panes, so I can watch a run without changing protocol behavior.
 6. As a developer, I want the functionality to be identical regardless of installed tools, so I never have to learn two modes.
 7. As a developer booting the skill for the first time, I want it to detect my environment, so I am not asked about things it can determine itself.
@@ -65,7 +65,7 @@ Make the coordinator a barebones, environment-independent loop of **bash** scrip
 45. As a maintainer, I want tests at the scripts' CLI boundary with a fake harness, so the loop is verified deterministically without real agents.
 46. As a maintainer, I want a concurrency test where many workers enqueue at once, so the queue's ordering and no-loss/no-double guarantees are proven.
 47. As a maintainer, I want the same suite to run with zero, one, and fake-`tmux` setups, so the environment-agnostic claim is proven, not asserted.
-48. As a maintainer, I want the core scripts to depend on nothing beyond a POSIX shell and `git`, so the barebones loop runs anywhere.
+48. As a maintainer, I want the core scripts to depend on nothing beyond bash and the standard Linux/WSL core utilities, so the barebones loop runs anywhere those exist.
 
 ## Implementation Decisions
 
@@ -81,21 +81,21 @@ All access goes through `cfg.sh` (`get`/`set`/`keys`/`unset`). `get` parses with
 
 **Boot flow.** `detect.sh` → writes `env.conf`, prints one compact line. `plan.sh` → reads `env.conf` (+ any `config.conf`), prints `PROPOSE` plus `ASK` only. Rules: one spawnable harness forces the role map and lanes; absent `tmux` forces adapters empty; absent `gh` forces tracker `local`; **model is always asked** (proposal is "harness default", chosen only if the user affirms). `apply.sh --answers "…"` (or `--accept` when `ASK` is empty) validates each referenced harness (`bin` exists, exec recipe resolves) and writes `config.conf`, printing `OK` or `FAIL <field>: <reason>`.
 
-**Launcher and session identity.**`coord` is a bash launcher: it generates a session id/name, starts the harness so that id is pinned (harness-specific flag, from `env.conf`; e.g. `--session-id`), records it to `<repo>/.coordinator/session`, runs the boot turn, and starts `relay.sh` detached. It also ensures `<repo>/.gitignore` ignores `.scratch/` and commits that (the first commit the coordinator authors in the run), so workers' `git add -A` can never stage finish markers. The relay reads `session` + the resume recipe to resume the coordinator.
+**Launcher and session identity.**`coord` is a bash launcher: it resolves the harness's REAL session id — `--session`, then `COORD_SESSION`, then the harness's own current session (`pi` via `$PI_SESSION_ID`; `codex` via the newest rollout under `$CODEX_HOME/sessions`), failing loudly rather than inventing a UUID no harness ever created — records it to `<repo>/.coordinator/session`, runs the boot turn, and starts `relay.sh` detached. It also ensures `<repo>/.gitignore` ignores `.scratch/` and commits that (the first commit the coordinator authors in the run), so workers' `git add -A` can never stage finish markers. The relay reads `session` + the resume recipe to resume the coordinator.
 
-**Ping queue.** `${COORD_ROOT}/queue/`, ordered and append-only. Enqueue: write the line to a temp file, `rename` to `<seq>.<slug>.ping`, where `seq` comes from a small `flock`-guarded counter (Linux/WSL). Ordering is total; uniqueness is guaranteed; a retry reuses its slug and is de-duplicated by `seen/<slug>`. Ephemeral state lives under `COORD_ROOT` (default `/tmp/coordinator`), passed to roles in the brief.
+**Ping queue.** `${COORD_ROOT}/queue/`, ordered and append-only. Enqueue is ONE atomic transaction under a single `flock`: de-dup check, sequence allocation, publish, and the `.seen` marker — so a concurrent retry of the same slug cannot double-publish, and publication order equals sequence order (a crash before publish leaves a sequence gap, never a reorder). Layout: `*.ping` pending (named `<seq>.<slug>.ping`), `.inflight/` claims, `.done/` acknowledged, `.seen/<slug>` de-dup markers.
 
 **Core CLI contracts** (fixed here because they encode decisions):
 - `finish.sh --event <slug> --role … --result … --head … --summary "…"` → writes the marker (`.scratch/status/<slug>.done`) **first**, then enqueues the ping; prints one line. Workers pass `--head -` (they have no commit); critics pass the reviewed-state hash.
 - `queue.sh enqueue <slug> <line> | list | pop-batch | done <slug>…` → queue primitives used by `finish.sh`, `relay.sh`, and `coord`.
-- `relay.sh` → long-lived serial consumer. Waits until the queue is non-empty (poll on the relay interval, or block on a FIFO). Takes all pending events in order, writes them to one batch file under `COORD_ROOT/batch/`, resumes the coordinator with a one-line pointer to that file, waits for the turn to exit, then moves the batch to `done/`. One turn at a time.
+- `relay.sh` → long-lived serial consumer. Waits until the queue is non-empty (poll on the relay interval, or block on a FIFO). Takes all pending events in order, writes them to one batch file under `COORD_ROOT/batch/`, resumes the coordinator with a one-line pointer to that file, waits for the turn to exit, then moves the batch to `done/`. One turn at a time. On startup, under the single-relay lock, it requeues any events stranded in `.inflight` by a previous crash.
 - `state.sh` verbs: `add`, `ready`, `next`, `dispatch`, `review`, `verdict`, `merged`, `blocked`, `drop`, `list [--pids]`, `done`, `render`; each prints one short line; `done` exits 0 iff every slice is `merged` or `dropped`.
 - `spawn.sh --role <r> --prompt <brief> --worktree <dir> [--slice <id>]` → reads role/model from config, builds argv from the exec recipe, launches detached, records `state.sh dispatch`, prints one line.
 - `merge.sh <id>` → recomputes the recorded reviewed-state hash from the worktree, refuses on any drift or unstaged/untracked (outside `.scratch/`) changes, authors the commit on the slice branch with the user's identity, merges in dependency order, pushes if `origin` exists, and records `state.sh merged`; refuses without recorded user approval.
 
 **Event flow.** Worker/critic finish → marker + enqueue. Relay batches and resumes the coordinator. Coordinator routes each event (`DONE` → dispatch critic; `VERDICT pass @ <state-hash>` → record, wait for a user `approve <id>` event, `merge.sh` (authors the commit, merges, pushes); `VERDICT handback` → correction brief to the same worker, new round slug). User decisions are enqueued via `coord approve|reject|msg <id>`, so the human is an ordinary producer.
 
-**Turn-start invariant.** The coordinator processes the batch file named in its resume pointer at the start of every turn. Because the relay claims the batch only after the turn exits, no event is lost or double-processed; the queue is the buffer and the relay is the serializer.
+**Turn-start invariant.** The coordinator processes the batch file named in its resume pointer at the start of every turn. Because the relay claims the batch only after the turn exits, no event is lost while the relay lives. Delivery is **at-least-once**: if the relay crashes after claiming, the events strand in `.inflight`; on restart, under the single-relay lock, the relay requeues stranded events and redelivers (routing actions must be idempotent, and critics are never re-spawned for a slice already under review).
 
 **Ledger and dashboard.** `<repo>/.coordinator/ledger.tsv` is the machine state, owned by `state.sh` (the only parser; no `jq`/`awk` in the skill). Fields: `id | status | blockers | task | round | worktree | branch | pid | head | verdict | merge | goal` (goal last); `head` holds the reviewed-state hash for a pass. `COORDINATION.md` becomes `state.sh render` output. The journal remains append-only history.
 

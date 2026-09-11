@@ -41,6 +41,18 @@ assert "$(head -n1 "$batch")" "EVENT a DONE a: done — one"
 "$Q" ack
 assert "$("$Q" depth)" "QUEUE pending=0 inflight=0 done=23"
 assert "$(ls "$COORD_ROOT/queue/.done" | wc -l)" "23"
+
+# concurrent retries of the SAME slug publish exactly once (atomic enqueue)
+for i in $(seq 1 10); do
+  "$Q" enqueue dupme 'DONE dupme: done' >/dev/null &
+done
+wait
+assert "$("$Q" list | wc -l)" "1"
+assert "$("$Q" list | awk '{print $2}')" "dupme"
+assert "$("$Q" enqueue dupme 'DONE dupme: done')" "DUP dupme"
+"$Q" pop-batch "$TMP/batch2" >/dev/null
+"$Q" ack
+assert "$("$Q" depth)" "QUEUE pending=0 inflight=0 done=24"
 if "$Q" pending; then echo "  queue should be empty"; exit 1; fi
 
 echo "  queue ok"

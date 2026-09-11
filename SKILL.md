@@ -31,7 +31,10 @@ one-line outputs.
    - changed fields → `scripts/apply.sh --answers "key=value key=value"`
    If the `ASK` block is empty, run `scripts/apply.sh --accept`.
    It prints `OK config=…` or `FAIL <field>: <reason>`; on `FAIL`, stop.
-4. `scripts/coord.sh` → `SESSION …` + `RELAY …`; starts the relay detached.
+4. `scripts/coord.sh` → `SESSION … source=…` + `RELAY …`; starts the relay
+   detached. If it fails, no fake ids are invented — pass `--session
+   <the-harness-real-session-id>` (pi uses `$PI_SESSION_ID`, codex the live
+   rollout).
 
 ## Slice lifecycle
 
@@ -62,6 +65,10 @@ resumed turn, read the batch file and route each `EVENT`:
 Correlate `DONE <slug>` / `VERDICT <slug>` to the slice whose id is the slug's
 task prefix (before the first `.`). An event for an unknown slice id is a
 protocol error — surface it, do not guess.
+
+Delivery is at-least-once: after a relay crash an event may be redelivered.
+Never re-spawn a critic for a slice already `reviewing` (check `state.sh`), and
+make every routing action idempotent.
 
 Then `state.sh ready`, dispatch each id from `state.sh next`, and when
 `state.sh done` exits 0, report what shipped and stop.

@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Start a coordinated run: pin the session id, record it, and start the relay.
+# Start a coordinated run: resolve the harness's REAL session id (never an
+# invented one — a resume can only wake a session that actually exists),
+# record it, and start the relay.
 #
 #   coord.sh [--harness H] [--session ID] [--no-relay]
-#     -> SESSION <id> harness=<h> repo=<repo>   [+ RELAY pid=<pid>]
+#     -> SESSION <id> source=<user|env|pi-env|codex-sessions> harness=<h> repo=<repo>
+#        [+ RELAY pid=<pid>]
 #
-# The coordinator identity is the current harness; the launcher only records the
-# session id the relay will resume and starts the relay detached.
+# Session id resolution order: --session arg, then COORD_SESSION, then the
+# harness's own current session (pi: $PI_SESSION_ID; codex: the newest rollout
+# in $CODEX_HOME/sessions, i.e. the live TUI session at boot). If none can be
+# resolved, coord fails loudly instead of recording a fake id.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,21 +32,42 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+resolve_session() { # -> "<id> <source>" on one line ; nonzero if unknown
+  [ -n "${1:-}" ] && { printf '%s user\n' "$1"; return 0; }
+  [ -n "${COORD_SESSION:-}" ] && { printf '%s env\n' "$COORD_SESSION"; return 0; }
+  case "$harness" in
+    pi)
+      [ -n "${PI_SESSION_ID:-}" ] && { printf '%s pi-env\n' "$PI_SESSION_ID"; return 0; }
+      ;;
+    codex)
+      local dir="${CODEX_HOME:-$HOME/.codex}/sessions" f
+      f="$(find "$dir" -name 'rollout-*.jsonl' -printf '%T@ %p\n' 2>/dev/null \
+        | sort -rn | head -1 | cut -d' ' -f2-)"
+      if [ -n "$f" ]; then
+        printf '%s codex-sessions\n' \
+          "$(basename "$f" .jsonl | awk -F- -v OFS=- '{print $(NF-4),$(NF-3),$(NF-2),$(NF-1),$NF}')"
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
 [ -n "$harness" ] || harness="$("$CFG" get "$ENV_CONF" current 2>/dev/null || true)"
 [ -n "$harness" ] || { echo "coord: no current harness (run detect.sh first)" >&2; exit 1; }
 
-if [ -z "$session" ]; then
-  if [ -r /proc/sys/kernel/random/uuid ]; then
-    session="$(cat /proc/sys/kernel/random/uuid)"
-  else
-    session="coord-$(date +%s)-$$"
-  fi
-fi
+read -r session sid_src < <(resolve_session "$session") || {
+  echo "coord: no resumable session id for harness '$harness' — no invented ids." >&2
+  echo "  pi:    relies on \$PI_SESSION_ID" >&2
+  echo "  codex: scans \${CODEX_HOME:-~/.codex}/sessions for the live rollout" >&2
+  echo "  fallback: pass --session <the harness's real session id>" >&2
+  exit 1
+}
 
 mkdir -p "$repo/.coordinator"
 printf '%s\n' "$session" > "$repo/.coordinator/session"
 
-printf 'SESSION %s harness=%s repo=%s\n' "$session" "$harness" "$repo"
+printf 'SESSION %s source=%s harness=%s repo=%s\n' "$session" "$sid_src" "$harness" "$repo"
 
 # repo hygiene: workers use `git add -A`, so keep finish markers out of the
 # index from the start. Ensure .gitignore ignores .scratch/ and commit it on

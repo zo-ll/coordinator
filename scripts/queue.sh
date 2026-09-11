@@ -14,7 +14,8 @@
 #   .inflight/        events claimed by the consumer, awaiting ack
 #   .done/            acknowledged events
 #   .seen/<slug>      de-dup marker, created at enqueue
-#   .seq, .seq.lock   ordered sequence counter (flock-guarded)
+#   .seq, .seq.lock   sequence counter; the enqueue check/alloc/publish/seen
+#                     runs as ONE atomic transaction under this lock
 set -euo pipefail
 
 COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
@@ -25,16 +26,6 @@ SEEN="$Q/.seen"
 
 mkdir -p "$Q" "$INFLIGHT" "$DONE" "$SEEN"
 
-next_seq() {
-  local n
-  exec 9>"$Q/.seq.lock"
-  flock 9
-  n=$(( $(cat "$Q/.seq" 2>/dev/null || echo 0) + 1 ))
-  printf '%s\n' "$n" > "$Q/.seq"
-  flock -u 9
-  printf '%s' "$n"
-}
-
 cmd="${1:-}"
 [ $# -gt 0 ] && shift
 
@@ -42,16 +33,25 @@ case "$cmd" in
   enqueue)
     slug="${1:?slug}"
     line="${2:?line}"
+    # the whole transaction — de-dup check, sequence allocation, publish,
+    # seen marker — runs under a single lock, so a concurrent retry of the
+    # same slug cannot double-publish, and publication order equals sequence
+    # order (a crash before publish leaves a sequence gap, never a reorder).
+    exec 9>"$Q/.seq.lock"
+    flock 9
     if [ -e "$SEEN/$slug" ]; then
+      flock -u 9
       printf 'DUP %s\n' "$slug"
       exit 0
     fi
-    seq="$(next_seq)"
-    f="$(printf '%012d' "$seq").$slug.ping"
+    n=$(( $(cat "$Q/.seq" 2>/dev/null || echo 0) + 1 ))
+    printf '%s\n' "$n" > "$Q/.seq"
+    f="$(printf '%012d' "$n").$slug.ping"
     tmp="$Q/.tmp.$$.$RANDOM"
     printf '%s\n' "$line" > "$tmp"
     mv -T -- "$tmp" "$Q/$f"
     : > "$SEEN/$slug"
+    flock -u 9
     printf 'ENQUEUED %s %s\n' "$slug" "$f"
     ;;
 

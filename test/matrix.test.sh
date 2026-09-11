@@ -47,8 +47,11 @@ assert() { [ "$1" = "$2" ] || { echo "  assert failed: '$1' != '$2'"; exit 1; };
 make_bin codex
 export COORD_KNOWN="codex"
 fresh one
-assert "$(PATH="$TMP/bin" "$DETECT")" \
-  "DETECT current=none installed=codex spawnable=codex tmux=0 gh=0"
+# current is environment-dependent (ancestor walk can match the test runner's
+# own harness); the matrix case only cares that the role map is forced.
+out="$(PATH="$TMP/bin" "$DETECT")"
+assert "$(printf '%s\n' "$out" | sed -E 's/current=[^ ]+ //')" \
+  "DETECT installed=codex spawnable=codex tmux=0 gh=0"
 out="$(PATH="$TMP/bin" "$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
   "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge tracker=local adapters=none"

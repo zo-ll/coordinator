@@ -13,6 +13,12 @@
 # exits nonzero — one clear line, never a silent spin. Fix the resume recipe and
 # restart the relay to drain what was returned.
 #
+# Delivery is at-least-once: if the relay crashes after claiming a batch, the
+# events are stranded in .inflight; on restart, while holding the single-relay
+# lock, the stranded events are requeued and redelivered. Actions must survive
+# redelivery (see the coordinator rule: never re-spawn a critic for a slice
+# already under review).
+#
 # Exactly one relay per COORD_ROOT: a non-blocking flock guards the loop, and a
 # fresh relay.pid is written (self-cleaned on exit) so a stale pid cannot point
 # at a dead process.
@@ -90,6 +96,10 @@ if ! flock -n 8; then
 fi
 printf '%s\n' "$$" > "$COORD_ROOT/relay.pid"
 trap 'rm -f "$COORD_ROOT/relay.pid"' EXIT
+
+# reclaim events stranded by a previous relay crash: the lock guarantees no
+# other consumer exists, so anything in .inflight is ours to requeue.
+"$QUEUE" nack
 
 deliver() { # batch: retry resume with backoff, ack on success, give up loudly
   local batch="$1" attempt=0 wait="$backoff"

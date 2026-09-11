@@ -26,6 +26,9 @@ done
   echo "finish.sh: --event, --role and --result are required" >&2
   exit 2
 }
+case "$event" in
+  *[!A-Za-z0-9._-]*|'') echo "finish.sh: invalid --event slug '$event' (use [A-Za-z0-9._-]+)" >&2; exit 2 ;;
+esac
 
 # Derive TASK and ROUND from the slug: foo -> foo/r1; foo.critic -> foo/r1;
 # foo.r2 -> foo/r2; foo.r2.critic -> foo/r2.

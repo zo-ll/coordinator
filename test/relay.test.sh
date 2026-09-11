@@ -100,4 +100,13 @@ assert "$("$QUEUE" depth)" "QUEUE pending=2 inflight=0 done=24"
 "$RELAY" --once --interval 0.2
 assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=26"
 
+# --- a crash-stranded batch in .inflight is reclaimed at relay startup ---
+export COORD_RESUME="$TMP/fake-resume|__SESSION__|__BATCH__"
+out="$("$QUEUE" enqueue str1 'DONE str1: done')"
+ping="${out##* }"
+mv "$COORD_ROOT/queue/$ping" "$COORD_ROOT/queue/.inflight/"
+assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=1 done=26"
+"$RELAY" --once --interval 0.2
+assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=27"
+
 echo "  relay ok"
