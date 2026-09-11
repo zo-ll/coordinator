@@ -4,6 +4,7 @@
 #   queue.sh enqueue <slug> <line>     -> ENQUEUED <slug> <file> | DUP <slug>
 #   queue.sh list                      -> one "<seq> <slug> <file>" line per pending event, in order
 #   queue.sh pending                   -> exit 0 if any pending, else 1
+#   queue.sh depth                     -> QUEUE pending=<n> inflight=<n> done=<n>
 #   queue.sh pop-batch <batchfile>     -> claim all pending into <batchfile>, in order
 #   queue.sh ack                       -> move claimed events to done/
 #   queue.sh nack                      -> return claimed events to the queue
@@ -70,6 +71,12 @@ case "$cmd" in
     exit 1
     ;;
 
+  depth)
+    shopt -s nullglob
+    p=("$Q"/*.ping); inf=("$INFLIGHT"/*.ping); dn=("$DONE"/*.ping)
+    printf 'QUEUE pending=%s inflight=%s done=%s\n' "${#p[@]}" "${#inf[@]}" "${#dn[@]}"
+    ;;
+
   pop-batch)
     batch="${1:?batchfile}"
     shopt -s nullglob
@@ -102,7 +109,7 @@ case "$cmd" in
     ;;
 
   *)
-    echo "usage: queue.sh enqueue|list|pending|pop-batch|ack|nack" >&2
+    echo "usage: queue.sh enqueue|list|pending|depth|pop-batch|ack|nack" >&2
     exit 2
     ;;
 esac

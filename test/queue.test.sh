@@ -31,12 +31,15 @@ assert "$("$Q" list | awk '{print $2}' | sort -u | wc -l)" "23"
 
 # pending / pop-batch claim all in order, then ack to done
 assert "$("$Q" pending && echo yes)" "yes"
+assert "$("$Q" depth)" "QUEUE pending=23 inflight=0 done=0"
 batch="$TMP/batch"
 "$Q" pop-batch "$batch" >/dev/null
+assert "$("$Q" depth)" "QUEUE pending=0 inflight=23 done=0"
 assert "$("$Q" list | wc -l)" "0"
 assert "$(grep -c '^EVENT ' "$batch")" "23"
 assert "$(head -n1 "$batch")" "EVENT a DONE a: done — one"
 "$Q" ack
+assert "$("$Q" depth)" "QUEUE pending=0 inflight=0 done=23"
 assert "$(ls "$COORD_ROOT/queue/.done" | wc -l)" "23"
 if "$Q" pending; then echo "  queue should be empty"; exit 1; fi
 
