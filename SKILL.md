@@ -59,6 +59,14 @@ Then `state.sh ready`, dispatch each id from `state.sh next`, and when
 
 You implement nothing and review nothing.
 
+## Observe (do not improvise)
+
+`scripts/status.sh` is the only sanctioned view of a run: relay liveness, queue
+depth, every slice with its pid's liveness, and the tail of each live role log.
+When the loop looks stalled, run `status.sh` and act on the protocol — never
+`tail` a role log, `ps` for agents, or read markers by hand. Improvised polling
+is how state diverges from the ledger.
+
 ## Adapters (optional launch)
 
 `config.conf:adapters` (empty = core `setsid`). Each `adapters/<name>.sh`
@@ -71,5 +79,6 @@ supervision and MUST NOT change delivery, the finish protocol, or routing.
 - Route on the event line and the verdict only; never read a worker's diff.
 - Merge only after a PASS bound to the exact HEAD plus recorded user approval.
 - Corrections go to the SAME worker; a new round uses a new slug.
+- Observe only through `status.sh`/`state.sh`; never poll logs or processes.
 - One issue, one worktree, one branch per slice. The user's git identity only.
 - Workers see only their brief; critics see diff + criteria + design ref.

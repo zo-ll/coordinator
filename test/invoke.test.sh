@@ -31,4 +31,10 @@ assert "${b[3]}" "-m"
 assert "${b[4]}" "big"
 assert "${b[5]}" "hello world"
 
+# a missing/unreadable brief fails loudly instead of half-launching
+if "$INVOKE" h1 worker "$TMP/nope" /cwd "" >/dev/null 2>"$TMP/err"; then
+  echo "  missing prompt allowed"; exit 1
+fi
+grep -q "prompt file not readable" "$TMP/err" || { echo "  unclear error:"; cat "$TMP/err"; exit 1; }
+
 echo "  invoke ok"

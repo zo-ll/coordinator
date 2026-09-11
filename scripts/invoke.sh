@@ -24,6 +24,8 @@ prompt="${3:?prompt-file}"
 cwd="${4:?cwd}"
 model="${5:-}"
 
+[ -r "$prompt" ] || { echo "invoke: prompt file not readable: $prompt" >&2; exit 1; }
+
 recipe="$("$CFG" get "$ENV_CONF" "harness.$harness.exec")" || {
   echo "invoke: no exec recipe for harness '$harness' in $ENV_CONF" >&2
   exit 1

@@ -31,6 +31,7 @@ done
   echo "spawn.sh: --role, --prompt and --worktree are required" >&2
   exit 2
 }
+[ -r "$prompt" ] || { echo "spawn.sh: prompt file not readable: $prompt" >&2; exit 1; }
 
 case "$role" in
   critic)     hkey=critic.harness;     mkey=critic.model ;;
@@ -43,7 +44,10 @@ h="$("$CFG" get "$CONFIG" "$hkey")" || { echo "spawn.sh: no $hkey in $CONFIG" >&
 m="$("$CFG" get "$CONFIG" "$mkey" 2>/dev/null || true)"
 
 mapfile -d '' -t argv < <("$INVOKE" "$h" "$role" "$prompt" "$wt" "$m")
-[ "${#argv[@]}" -gt 0 ] || { echo "spawn.sh: invoke produced an empty argv" >&2; exit 1; }
+[ "${#argv[@]}" -gt 0 ] || {
+  echo "spawn.sh: no argv for role '$role' (harness '$h'): check the exec recipe and the brief" >&2
+  exit 1
+}
 
 logdir="$COORD_ROOT/log"
 mkdir -p "$logdir"

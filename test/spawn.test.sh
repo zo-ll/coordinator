@@ -35,6 +35,13 @@ printf 'do the thing\n' > "$TMP/brief"
 
 "$STATE" add s1 "a slice" >/dev/null
 
+# a missing brief fails loudly before anything launches
+if "$SPAWN" --role worker --prompt "$TMP/nope" --worktree "$WT" --slice s1 2>"$TMP/err"; then
+  echo "  missing prompt allowed"; exit 1
+fi
+grep -q "prompt file not readable" "$TMP/err" || { echo "  unclear error:"; cat "$TMP/err"; exit 1; }
+[ ! -f "$FAKE_LOG" ] || { echo "  launched with a missing brief"; exit 1; }
+
 out="$("$SPAWN" --role worker --prompt "$TMP/brief" --worktree "$WT" --slice s1)"
 case "$out" in
   SPAWN\ worker\ slice=s1\ pid=*) ;;
