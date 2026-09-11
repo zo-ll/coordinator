@@ -92,15 +92,19 @@ other harnesses' worker recipes): claude exec now runs with
   Decided fix (harness-agnostic): the finish contract is now APPENDED
   mechanically by spawn.sh, so no coordinator can skip it.
 
-**Verdict** (pending rerun with repo settings): session identity + resume
-recipe work; the wake executes but the auto-resumed claude turn is a *fresh
-process* with its own permission context: every write/exec is blocked (no
-prompt can reach the user in an automated resume), and claude's allowed-
-directory scoping even blocks reaching the coordinator scripts outside the
-project. Fix (uniform boot hygiene, like .gitignore): coord.sh now ensures
-`<repo>/.claude/settings.local.json` with `bypassPermissions`, so every
-claude process in the repo (workers and resumed turns alike) has full
-permissions per the worker policy.
+**Verdict: ✅ works, fully headless.** After three fixes the loop closed
+end-to-end: session discovery (claude-projects) → resume wake with full
+permissions → worker (stage-only, finish via the appended contract) → critic
+(slice-bound, state-hash verdict) → approval → coordinator-authored commit →
+merge; `test_todo.sh` passes on main. Cost of admission:
+
+- resume recipe and exec recipe carry `--dangerously-skip-permissions`;
+- repo `.claude/settings.local.json` (bypassPermissions) authored at boot;
+- the coordinator turn runs OUTSIDE the visible TUI — claude has no
+  `queue`-into-live like codex; every wake is a hidden background process,
+  so **the user sees nothing** beyond the ledger (status.sh). The approval
+  question was answered entirely inside the headless session (approvals/<id>
+  recorded). Visibility is the outstanding gap (separate issue).
 
 ---
 
@@ -127,7 +131,7 @@ pencil: pending run
 | | codex | claude | opencode | pi |
 |---|---|---|---|---|
 | skill surface | AGENTS.md / skills dir | `/coordinator` | config instructions | pi skills |
-| session discovery | newest rollout | pending | manual `--session` | `PI_SESSION_ID` |
-| wake | `codex queue` (live push) | pending | `run --session` | `--resume` |
-| git perms | `-s workspace-write` / trust | pending | pending | pending |
-| loop quirks | slug suffixing, profile PATH leak | pending | pending | pending |
+| session discovery | newest rollout | newest project jsonl | manual `--session` | `PI_SESSION_ID` |
+| wake | `codex queue` (live push) | resume (headless, invisible) | `run --session` | `--resume` — pending |
+| git perms | `-s workspace-write` / trust | `--dangerously-skip-permissions` + repo settings | `--auto` (workers) | pending |
+| loop quirks | slug suffixing, profile PATH leak | one-slice decomposition; missing-finish brief; headless | pending | pending |
