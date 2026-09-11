@@ -86,7 +86,13 @@ fi
 
 if [ "$start_relay" = 1 ]; then
   mkdir -p "$COORD_ROOT"
-  COORD_SESSION="$session" setsid "$HERE/relay.sh" >>"$COORD_ROOT/relay.log" 2>&1 &
+  # pin the resume recipe so the relay never depends on env.conf `current`,
+  # which may be unresolved in the coordinator's shell; config is explicit.
+  cfgf="$repo/.coordinator/config.conf"
+  [ -f "$cfgf" ] || : > "$cfgf"
+  rec="$("$CFG" get "$ENV_CONF" "harness.$harness.resume" 2>/dev/null || true)"
+  [ -n "$rec" ] && "$CFG" set "$cfgf" relay.resume "$rec"
+  COORD_CONFIG="$cfgf" COORD_SESSION="$session" setsid "$HERE/relay.sh" >>"$COORD_ROOT/relay.log" 2>&1 &
   pid="$!"
   printf '%s\n' "$pid" > "$COORD_ROOT/relay.pid"
   printf 'RELAY pid=%s\n' "$pid"

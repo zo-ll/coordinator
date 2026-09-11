@@ -4,6 +4,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COORD="$HERE/../scripts/coord.sh"
+CFG="$HERE/../scripts/cfg.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"; [ -n "${relay_pid:-}" ] && kill "$relay_pid" 2>/dev/null || true' EXIT
 
@@ -11,6 +12,7 @@ export COORD_HOME="$TMP/coord"
 export COORD_ENV_CONF="$TMP/coord/env.conf"
 export COORD_ROOT="$TMP/coord"
 export COORD_REPO="$TMP/repo"
+export COORD_CONFIG="$TMP/repo/.coordinator/config.conf"
 # make session resolution deterministic (no inherited harness sentinels)
 unset PI_SESSION_ID COORD_SESSION
 mkdir -p "$COORD_HOME" "$COORD_REPO"
@@ -29,11 +31,13 @@ assert "$(cat "$COORD_REPO/.coordinator/session")" "test-sess"
 grep -qx '.scratch/' "$COORD_REPO/.gitignore" || { echo "  .gitignore lacks .scratch/"; exit 1; }
 git -C "$COORD_REPO" log -1 --format=%s | grep -q 'ignore .scratch markers' || { echo "  gitignore not committed"; exit 1; }
 
-# starts a detached relay
+# starts a detached relay, pinning the resume recipe into config
 out="$("$COORD" --session s2)"
 case "$out" in *RELAY\ pid=*) ;; *) echo "  relay not started: $out"; exit 1 ;; esac
 relay_pid="$(cat "$COORD_ROOT/relay.pid")"
 kill -0 "$relay_pid" 2>/dev/null || { echo "  relay pid not alive"; exit 1; }
+assert "$("$CFG" get "$COORD_CONFIG" relay.resume)" \
+  "codex|exec|resume|__SESSION__|__BATCH__"
 kill "$relay_pid" 2>/dev/null || true
 relay_pid=""
 
