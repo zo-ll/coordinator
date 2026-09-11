@@ -53,6 +53,11 @@ for _ in $(seq 1 50); do [ -f "$FAKE_LOG" ] && break; sleep 0.1; done
 grep -q "cwd=$WT" "$FAKE_LOG" || { echo "  wrong cwd:"; cat "$FAKE_LOG"; exit 1; }
 grep -q "arg=do the thing" "$FAKE_LOG" || { echo "  brief missing:"; cat "$FAKE_LOG"; exit 1; }
 
+# the finish contract is appended mechanically, not left to the brief
+for _ in $(seq 1 50); do grep -q 'FINISH CONTRACT' "$FAKE_LOG" && break; sleep 0.1; done
+grep -q -- '--event s1 --role worker --result done --head -' "$FAKE_LOG" || {
+  echo "  finish contract missing:"; cat "$FAKE_LOG"; exit 1; }
+
 [ "$("$STATE" get s1 status)" = "dispatched" ] || { echo "  s1 not dispatched"; exit 1; }
 [ -n "$("$STATE" get s1 pid)" ] || { echo "  pid not recorded"; exit 1; }
 [ -n "$("$STATE" get s1 branch)" ] || { echo "  branch not recorded"; exit 1; }

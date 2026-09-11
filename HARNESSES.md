@@ -83,15 +83,19 @@ other harnesses' worker recipes): claude exec now runs with
 **Loop quirks observed.**
 - Decomposed the mission into ONE slice (`todo` = CLI + tests + README)
   where codex used three. Behavior difference, not an error.
-- The brief omitted the concrete `finish.sh --event <slug>` line the worker
-  contract requires (only a generic instruction); the worker could not finish
-  and reported the blocker instead of fabricating — a nice refusal, but the
-  coordinator didn't honor the brief template.
-- Worker blocked writes reproduces "consistently across retries," per its
-  own report — permission-mode, not flake.
+- Worker reports are verbose prose to the log (it wrote a full obstruction
+  report the first run instead of fabricating — good refusal).
+- **The coordinator omits the concrete `finish.sh` line from briefs** — twice,
+  consistently. First run the worker was also write-blocked (fixed by the
+  per-process permission flag); second run the worker did all the work,
+  staged it, and could not finish because the brief had no finish command.
+  Decided fix (harness-agnostic): the finish contract is now APPENDED
+  mechanically by spawn.sh, so no coordinator can skip it.
 
-**Verdict** (pending rerun with the recipe fix): session discovery and wake
-recipe work; the worker-permission scoping must be bypassed per-process.
+**Verdict** (pending rerun with the mechanical finish append): session
+identity + wake recipe + full permissions all work; the per-directory
+permission scoping and the missing-finish brief were claude's two quirks,
+and both are fixed at the protocol level, not by claude-specific code.
 
 ---
 

@@ -40,6 +40,36 @@ case "$role" in
   *) echo "spawn.sh: unknown role: $role" >&2; exit 2 ;;
 esac
 
+# The finish contract is MECHANICAL: it must not depend on the coordinator
+# remembering to write it. Append the exact contract to the brief so every
+# worker/critic can always finish — the worker's --event is the slice id
+# (plus round), the critic's is <id>.critic with a template it fills in.
+if [ -n "$slice" ]; then
+  round="$("$STATE" get "$slice" round 2>/dev/null || echo 1)"
+  if [ "$round" -gt 1 ] 2>/dev/null; then wslug="$slice.r$round"; else wslug="$slice"; fi
+  case "$role" in
+    worker)
+      cp "$prompt" "$prompt.finish"
+      cat >> "$prompt.finish" <<EOF
+
+FINISH CONTRACT (do not skip; this is the completion protocol):
+$HERE/finish.sh --event $wslug --role worker --result done --head - --summary "<one line>"
+EOF
+      prompt="$prompt.finish"
+      ;;
+    critic)
+      cp "$prompt" "$prompt.finish"
+      cat >> "$prompt.finish" <<EOF
+
+FINISH CONTRACT (do not skip; this is the completion protocol):
+$HERE/finish.sh --event $slice.critic --role critic --result <pass|handback> --head <hash>
+where <hash> = git diff HEAD | sha256sum | cut -d' ' -f1, run in this worktree.
+EOF
+      prompt="$prompt.finish"
+      ;;
+  esac
+fi
+
 h="$("$CFG" get "$CONFIG" "$hkey")" || { echo "spawn.sh: no $hkey in $CONFIG" >&2; exit 1; }
 m="$("$CFG" get "$CONFIG" "$mkey" 2>/dev/null || true)"
 
