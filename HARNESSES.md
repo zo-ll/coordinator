@@ -108,12 +108,32 @@ merge; `test_todo.sh` passes on main. Cost of admission:
 
 ---
 
-## opencode  ⏳ pending
+## opencode  ✅ loop completes in-session; wake channel broken
 
-_Discovery_: none yet — session store is sqlite without `sqlite3`; `opencode
-session list` is not machine-readable here; expect `--session` handoff.
+_Skill install_: `~/.agents/skills/coordinator` (symlink); surfacing is via
+`instructions` in `~/.config/opencode/opencode.json` (same list as caveman).
 
-pencil: pending run
+**Session identity**: NO discovery in coord.sh (sessions live in an sqlite
+store; `opencode session list` is not machine-readable without sqlite3).
+coord fails loudly → the coordinator read its own id from the TUI
+(`ses_…`) and passed `--session` (source=user). Demonstration that the
+loud-failure design works as an escape hatch.
+
+**Wake**: `opencode run --session <id> --auto <msg>` ERRORS with
+`UnknownError: "Unexpected server error"` — opencode's live session is
+server-backed (`opencode serve` / `attach <url>`), and a second headless
+`run --session` against the live server fails (same active-writer shape as
+codex's `exec resume`). The proper live push is `opencode attach`, whose
+URL appears when the TUI starts.
+
+**Yet the run completed:** decomposed into THREE slices (todo/tests/readme),
+critics slice-named, approvals recorded for all, `test_todo.sh` passes on
+main. The coordinator routed entirely in-session; the relay wake never
+landed (6 events sat requeued).
+
+**Verdict**: the loop is real, but opencode delivery currently means the
+coordinator acts in its TUI rather than via relay wake; a future fix is an
+`attach`-based resume recipe.
 
 ---
 
@@ -132,6 +152,6 @@ pencil: pending run
 |---|---|---|---|---|
 | skill surface | AGENTS.md / skills dir | `/coordinator` | config instructions | pi skills |
 | session discovery | newest rollout | newest project jsonl | manual `--session` | `PI_SESSION_ID` |
-| wake | `codex queue` (live push) | resume (headless, invisible) | `run --session` | `--resume` — pending |
-| git perms | `-s workspace-write` / trust | `--dangerously-skip-permissions` + repo settings | `--auto` (workers) | pending |
-| loop quirks | slug suffixing, profile PATH leak | one-slice decomposition; missing-finish brief; headless | pending | pending |
+| wake | `codex queue` (live push) | resume (headless, invisible) | `run --session` → server error; in-session instead | `--resume` — pending |
+| git perms | `-s workspace-write` / trust | `--dangerously-skip-permissions` + repo settings | `--auto` (workers + resume) | pending |
+| loop quirks | slug suffixing, profile PATH leak | one-slice; missing-finish brief; headless | self-discovered `--session`; server-backed sessions | pending |
