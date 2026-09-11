@@ -35,6 +35,12 @@ printf 'do the thing\n' > "$TMP/brief"
 
 "$STATE" add s1 "a slice" >/dev/null
 
+# a worker/critic without --slice refuses loudly (finish contract + ledger)
+if "$SPAWN" --role critic --prompt "$TMP/brief" --worktree "$WT" >/dev/null 2>"$TMP/err"; then
+  echo "  critic without --slice allowed"; exit 1
+fi
+grep -q -- '--slice is required' "$TMP/err" || { echo "  unclear slice error:"; cat "$TMP/err"; exit 1; }
+
 # a missing brief fails loudly before anything launches
 if "$SPAWN" --role worker --prompt "$TMP/nope" --worktree "$WT" --slice s1 2>"$TMP/err"; then
   echo "  missing prompt allowed"; exit 1

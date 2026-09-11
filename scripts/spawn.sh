@@ -32,6 +32,12 @@ done
   exit 2
 }
 [ -r "$prompt" ] || { echo "spawn.sh: prompt file not readable: $prompt" >&2; exit 1; }
+# a worker or critic IS a slice round; without --slice the finish contract
+# cannot be appended and the role cannot be recorded (see issue #5)
+if [ "$role" != researcher ] && [ -z "$slice" ]; then
+  echo "spawn.sh: --slice is required for role '$role' (finish contract + ledger)" >&2
+  exit 2
+fi
 
 case "$role" in
   critic)     hkey=critic.harness;     mkey=critic.model ;;

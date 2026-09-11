@@ -45,7 +45,8 @@ one-line outputs.
 - Worktree: `scripts/worktree.sh --slice <id> --slug <slug>`
 - Dispatch a worker:
   `scripts/spawn.sh --role worker --prompt <brief> --worktree <dir> --slice <id>`
-- Review: `scripts/spawn.sh --role critic --prompt <assignment> --worktree <dir>`
+- Review: `scripts/spawn.sh --role critic --prompt <assignment>
+  --worktree <dir> --slice <id>` (a critic is a review round of a slice).
 - Close: after a `pass` bound to the exact reviewed state (the critic's
   `git diff HEAD | sha256sum` of the worktree) and the user's approval,
   `scripts/merge.sh --slice <id>`.
