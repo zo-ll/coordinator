@@ -21,6 +21,7 @@ exec_recipe() {
     codex)  echo 'codex|exec|-C|__CWD__|--dangerously-bypass-approvals-and-sandbox|__PROMPT__' ;;
     claude) echo 'claude|-p|__PROMPT__' ;;
     pi)     echo 'pi|__PROMPT__' ;;
+    opencode) echo 'opencode|run|__PROMPT__' ;;
     *) return 1 ;;
   esac
 }
@@ -30,6 +31,7 @@ resume_recipe() {
     codex)  echo 'codex|queue|--thread|__SESSION__|--message|__BATCH__' ;;
     claude) echo 'claude|-p|--resume|__SESSION__|__BATCH__' ;;
     pi)     echo 'pi|--resume|__SESSION__|__BATCH__' ;;
+    opencode) echo 'opencode|run|--session|__SESSION__|__BATCH__' ;;
     *) return 1 ;;
   esac
 }

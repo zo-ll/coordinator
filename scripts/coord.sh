@@ -49,6 +49,20 @@ resolve_session() { # -> "<id> <source>" on one line ; nonzero if unknown
         return 0
       fi
       ;;
+    claude)
+      local f
+      f="$(find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -name '*.jsonl' -printf '%T@ %p\n' 2>/dev/null \
+        | sort -rn | head -1 | cut -d' ' -f2-)"
+      if [ -n "$f" ]; then
+        printf '%s claude-projects\n' "$(basename "$f" .jsonl)"
+        return 0
+      fi
+      ;;
+    opencode)
+      # sessions live in a sqlite store with no reliable read access here;
+      # require the coordinator to pass --session explicitly.
+      return 1
+      ;;
   esac
   return 1
 }
@@ -58,8 +72,10 @@ resolve_session() { # -> "<id> <source>" on one line ; nonzero if unknown
 
 read -r session sid_src < <(resolve_session "$session") || {
   echo "coord: no resumable session id for harness '$harness' — no invented ids." >&2
-  echo "  pi:    relies on \$PI_SESSION_ID" >&2
-  echo "  codex: scans \${CODEX_HOME:-~/.codex}/sessions for the live rollout" >&2
+  echo "  pi:       relies on \$PI_SESSION_ID" >&2
+  echo "  codex:    scans \${CODEX_HOME:-~/.codex}/sessions for the live rollout" >&2
+  echo "  claude:   scans \${CLAUDE_CONFIG_DIR:-~/.claude}/projects for the live jsonl" >&2
+  echo "  opencode: no machine-readable id yet; pass --session from the TUI" >&2
   echo "  fallback: pass --session <the harness's real session id>" >&2
   exit 1
 }
