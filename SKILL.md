@@ -63,8 +63,10 @@ resumed turn, read the batch file and route each `EVENT`:
   worker with a new round slug.
 
 Correlate `DONE <slug>` / `VERDICT <slug>` to the slice whose id is the slug's
-task prefix (before the first `.`). An event for an unknown slice id is a
-protocol error — surface it, do not guess.
+task prefix (before the first `.`). Resolve the task to a slice id in this
+order: (1) exact ledger id; (2) if the task ends in `-<suffix>`, retry with the
+trailing `-…` segment stripped (a worker may carry the worktree suffix);
+(3) otherwise it is a protocol error — surface it, do not guess.
 
 Delivery is at-least-once: after a relay crash an event may be redelivered.
 Never re-spawn a critic for a slice already `reviewing` (check `state.sh`), and

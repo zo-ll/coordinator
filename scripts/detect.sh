@@ -27,7 +27,7 @@ exec_recipe() {
 
 resume_recipe() {
   case "$1" in
-    codex)  echo 'codex|exec|resume|--dangerously-bypass-approvals-and-sandbox|__SESSION__|__BATCH__' ;;
+    codex)  echo 'codex|queue|--thread|__SESSION__|--message|__BATCH__' ;;
     claude) echo 'claude|-p|--resume|__SESSION__|__BATCH__' ;;
     pi)     echo 'pi|--resume|__SESSION__|__BATCH__' ;;
     *) return 1 ;;
