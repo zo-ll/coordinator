@@ -29,7 +29,7 @@ exec_recipe() {
 resume_recipe() {
   case "$1" in
     codex)  echo 'codex|queue|--thread|__SESSION__|--message|__BATCH__' ;;
-    claude) echo 'claude|-p|--resume|__SESSION__|__BATCH__' ;;
+    claude) echo 'claude|-p|--resume|__SESSION__|--dangerously-skip-permissions|__BATCH__' ;;
     pi)     echo 'pi|--resume|__SESSION__|__BATCH__' ;;
     opencode) echo 'opencode|run|--session|__SESSION__|__BATCH__' ;;
     *) return 1 ;;
