@@ -25,7 +25,9 @@ ROOT=/tmp/coord-4x
 RES="$ROOT/results"
 HARNESSES="codex claude opencode pi"
 SEND=1
-SEND_DELAY="${SEND_DELAY:-16}"
+SEND_DELAY="${SEND_DELAY:-25}"
+CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-luna}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
 
 PROMPT='Build a small todo CLI in bash named `todo`: add/list/done with items in ~/.todo, a test script exercising all three commands, and a README. Coordinate it — split into slices, delegate, review, and merge.'
 
@@ -41,6 +43,24 @@ done
 
 rm -rf "$ROOT"
 mkdir -p "$RES"
+
+# full permissions: pre-seed trust so TUIs never sit at a dialog (codex via
+# config.toml trust_level; claude via ~/.claude.json trustEnabled - the claude
+# dialog may still appear, create-sandbox auto-answers it below)
+{
+  for h in codex claude opencode pi; do
+    printf '\n[projects."%s/%s/tinyproj"]\ntrust_level = "trusted"\n' "$ROOT" "$h"
+  done
+} >> "$HOME/.codex/config.toml"
+python3 - "$ROOT" <<'PY'
+import json,sys
+p='/home/andrea/.claude.json'
+c=json.load(open(p))
+proj=c.setdefault('projects',{})
+for h in ['codex','claude','opencode','pi']:
+    proj.setdefault(f"{sys.argv[1]}/{h}/tinyproj",{}).update({'trustEnabled':True,'allowedTools':[]})
+json.dump(c,open(p,'w'),indent=2)
+PY
 
 # per-harness watcher: full-context timeline into results/<h>.log
 cat > "$ROOT/watch.sh" <<EOF
@@ -88,8 +108,8 @@ for h in $HARNESSES; do
     done
   done
   case "$h" in
-    codex)   ln -s "$(command -v codex)"    "$BIN/codex";   LAUNCH="codex -s workspace-write" ;;
-    claude)  ln -s "$(command -v claude)"   "$BIN/claude";  LAUNCH="claude" ;;
+    codex)   ln -s "$(command -v codex)"    "$BIN/codex";   ln -s "$(command -v node)" "$BIN/node"; LAUNCH="codex -s workspace-write -c model=\"$CODEX_MODEL\"" ;;
+    claude)  ln -s "$(command -v claude)"   "$BIN/claude";  LAUNCH="claude --model $CLAUDE_MODEL" ;;
     opencode) ln -s "$(command -v opencode)" "$BIN/opencode"; LAUNCH="opencode" ;;
     pi)      ln -s "$(command -v pi)"       "$BIN/pi"; ln -s "$(command -v node)" "$BIN/node"; LAUNCH="pi" ;;
   esac
@@ -140,10 +160,15 @@ if [ "$SEND" = 1 ]; then
   echo "== waiting ${SEND_DELAY}s for TUIs to boot, then sending the prompt =="
   sleep "$SEND_DELAY"
   for h in $HARNESSES; do
-    widx="$(cat "$RES/$h.window" 2>/dev/null || echo "coord-$h")"
+    widx="$(cat "$RES/$h.window" 2>/dev/null || tmux display -t "coord-$h" -p '#{window_index}' 2>/dev/null)"
     if [ "$h" = claude ]; then
+      tmux send-keys -t "$widx" Down Enter   # trust dialog: "Yes, I trust this folder"
+      sleep 4
       tmux send-keys -t "$widx" -- "/coordinator" Enter
-      sleep 3
+      sleep 4
+    elif [ "$h" = codex ]; then
+      tmux send-keys -t "$widx" Enter        # trust dialog: "1. Yes, continue"
+      sleep 4
     fi
     tmux send-keys -t "$widx" -- "$PROMPT" Enter
     echo "sent prompt to coord-$h (window $widx)"
