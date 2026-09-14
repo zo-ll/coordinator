@@ -125,6 +125,26 @@ for h in $HARNESSES; do
 
   printf '%s\n' "$PROMPT" > "$D/prompt.txt"
 
+  # pre-apply the config: full permissions + no prompts. plan.sh sees an
+  # existing config -> empty ASK; apply --accept is a no-op re-boot; every
+  # merge later is auto (no approval dialogs). The run is fully unattended.
+  cd="$D/tinyproj/.coordinator"
+  mkdir -p "$cd"
+  cat > "$cd/config.conf" <<CFG
+critic.harness=$h
+critic.model=
+researcher.harness=$h
+researcher.model=
+lane.default.harness=$h
+lane.default.model=
+routing.mechanical=default
+routing.risky=default
+autonomy=auto-merge
+tracker=local
+adapters=none
+merge.base=main
+CFG
+
   # one window per harness (apps may retitle - codex sets "node" - so keep the
   # stable index for sending/poking)
   tmux kill-window -t "coord-$h" 2>/dev/null || true

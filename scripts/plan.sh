@@ -20,8 +20,11 @@ mkdir -p "$COORD_HOME"
 
 get() { "$CFG" get "$ENV_CONF" "$1" 2>/dev/null || true; }
 
-# already configured -> nothing to ask
+# already configured -> nothing to ask; still write the proposal from the
+# existing config so a re-boot (e.g. a pre-applied sandbox config) can run
+# apply.sh --accept cleanly instead of failing on a missing proposal.
 if [ -f "$CONFIG" ]; then
+  cp "$CONFIG" "$PROPOSAL"
   printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=%s tracker=%s adapters=%s\n' \
     "$("$CFG" get "$CONFIG" critic.harness 2>/dev/null || echo -)" \
     "$("$CFG" get "$CONFIG" researcher.harness 2>/dev/null || echo -)" \
