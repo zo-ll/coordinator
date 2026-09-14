@@ -22,6 +22,24 @@ export COORD_RESUME="$TMP/fake-resume|__SESSION__|__BATCH__"
 
 assert() { [ "$1" = "$2" ] || { echo "  assert failed: '$1' != '$2'"; exit 1; }; }
 
+# __SERVER__ placeholder substitution from COORD_OPENCODE_SERVER (opencode attach wake)
+# isolated root: --once only exits after processing a wave, so give it one
+cat > "$TMP/server-resume" <<'EOF'
+#!/usr/bin/env bash
+printf 'RAW:%s\n' "$*" >> "$RELAY_LOG"
+EOF
+chmod +x "$TMP/server-resume"
+export COORD_ROOT="$TMP/root2"
+"$QUEUE" enqueue srv 'DONE srv: done' >/dev/null
+COORD_RESUME="$TMP/server-resume|--attach|__SERVER__|__SESSION__|__BATCH__" \
+  COORD_OPENCODE_SERVER="http://127.0.0.1:45111" "$RELAY" --once --interval 0.2
+server_line="$(tail -1 "$RELAY_LOG")"
+case "$server_line" in
+  *"--attach http://127.0.0.1:45111"*) ;;
+  *) echo "  __SERVER__ not substituted: $server_line"; exit 1 ;;
+esac
+export COORD_ROOT="$TMP/coord"
+
 # a wave already queued before the relay starts -> exactly one batch
 for i in $(seq 1 20); do
   "$QUEUE" enqueue "t$i" "DONE t$i: done — x" >/dev/null
