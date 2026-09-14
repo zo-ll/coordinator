@@ -67,14 +67,20 @@ resume_recipe() {
   [ -n "$cur" ] && cfg_get "$envconf" "harness.$cur.resume"
 }
 
+normalize_id() { # strip a rollout- prefix / leading ISO timestamp (codex rollouts)
+  local id="$1"
+  id="${id#rollout-}"
+  printf '%s' "$id" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}-//'
+}
+
 session_id() {
-  [ -n "${COORD_SESSION:-}" ] && { printf '%s' "$COORD_SESSION"; return 0; }
+  [ -n "${COORD_SESSION:-}" ] && { normalize_id "$COORD_SESSION"; return 0; }
   local file="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
   local v; v="$(cfg_get "$file" relay.session)"
-  [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+  [ -n "$v" ] && { normalize_id "$v"; return 0; }
   local dir; dir="$(dirname "$file")"
-  [ -f "$dir/session" ] && { cat "$dir/session"; return 0; }
-  [ -f "$PWD/.coordinator/session" ] && cat "$PWD/.coordinator/session"
+  [ -f "$dir/session" ] && { normalize_id "$(cat "$dir/session")"; return 0; }
+  [ -f "$PWD/.coordinator/session" ] && normalize_id "$(cat "$PWD/.coordinator/session")"
 }
 
 resume() { # pointer

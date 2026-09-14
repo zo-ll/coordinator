@@ -130,3 +130,27 @@ assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=1 done=26"
 assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=27"
 
 echo "  relay ok"
+
+# codex rollout-style session id (timestamped/rollout-prefixed) must normalize
+# to the bare uuid the queue wake expects
+cat > "$TMP/id-resume" <<'IDEOF'
+#!/usr/bin/env bash
+printf 'ID:%s\n' "$*" >> "$RELAY_LOG"
+IDEOF
+chmod +x "$TMP/id-resume"
+export COORD_ROOT="$TMP/root3"
+"$QUEUE" enqueue srv3 'DONE srv3: done' >/dev/null
+COORD_RESUME="$TMP/id-resume|__SESSION__|__BATCH__" \
+  COORD_SESSION="rollout-2026-09-14T17-12-11-01a0a079-caa2-7b03-a986-0a47f70e7c12" \
+  "$RELAY" --once --interval 0.2
+id_line="$(tail -1 "$RELAY_LOG")"
+case "$id_line" in
+  *"01a0a079-caa2-7b03-a986-0a47f70e7c12"*) ;;
+  *) echo "  session not normalized: $id_line"; exit 1 ;;
+esac
+case "$id_line" in
+  *"2026-09-14T17-12-11-"*) echo "  timestamp still in session: $id_line"; exit 1 ;;
+esac
+export COORD_ROOT="$TMP/coord"
+
+echo "  session-id normalization ok"

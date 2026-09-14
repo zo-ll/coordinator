@@ -79,7 +79,10 @@ LOG="$RES/\$h.log"
 cd "$ROOT/\$h/tinyproj"
 snap() { {
   echo "=== \$(date +%H:%M:%S) ==="
-  "\$S/status.sh" 2>/dev/null || echo "(no coordinator state yet)"
+  "\$S/status.sh" 2>/dev/null || true
+  # (status.sh exits nonzero when it reports STALE; print its output either way)
+  out="\$(\"\$S/status.sh\" 2>/dev/null || true)"
+  if [ -n "\$out" ]; then printf '%s\\n' "\$out"; else echo "(no coordinator state yet)"; fi
   echo "-- git --"; git log --oneline --all 2>/dev/null | head -8
   git worktree list 2>/dev/null | head -6
   echo "-- files --"; ls 2>/dev/null
@@ -142,6 +145,7 @@ PIN
     echo "tiny project" > README.md &&
     mkdir -p .claude &&
     printf '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  }\n}\n' > .claude/settings.local.json &&
+    printf '{\n  "$schema": "https://opencode.ai/config.json",\n  "permission": {\n    "tools": {\n      "read": "allow",\n      "write": "allow",\n      "edit": "allow",\n      "bash": "allow",\n      "glob": "allow",\n      "grep": "allow",\n      "list": "allow"\n    }\n  }\n}\n' > opencode.json &&
     git add -A && git add -f .claude/settings.local.json && git commit -q -m init &&
     git branch -m main )
 
@@ -198,21 +202,72 @@ cp "$ROOT/watch.sh" "$RES/watch.sh" 2>/dev/null || true
 echo "== sandboxes ready =="
 cat "$RES/manifest.txt"
 
+# --- boot handshake -------------------------------------------------------
+# TUIs are interactive: one blind timed send-keys is not enough (observed: the
+# Enter eaten at boot, a trust/permission dialog still up, or the session
+# picker in front). Poll the pane, answer the known per-harness dialogs, then
+# submit with verification + retry.
+pane_has() { tmux capture-pane -t "$1" -p 2>/dev/null | grep -qiE "$2"; }
+wait_for() { # <win> <pattern> <tries>
+  local w="$1" pat="$2" n="${3:-20}" i
+  for i in $(seq 1 "$n"); do pane_has "$w" "$pat" && return 0; sleep 1; done
+  return 1
+}
+submit_prompt() { # <harness> <win> <text>; verifies the text left the input
+  local h="$1" w="$2" text="$3" i probe
+  probe="$(printf '%s' "$text" | cut -c1-40)"
+  for i in 1 2 3; do
+    tmux send-keys -t "$w" -- "$text" Enter
+    sleep 3
+    pane_has "$w" "$(printf '%s' "$probe" | sed 's/[][\.*^$(){}?+|/]/\\&/g')" || return 0
+    sleep 2
+  done
+  echo "  WARN: coord-$h prompt may still be sitting in its input"
+  return 0
+}
+boot_harness() { # <harness> <win>
+  local h="$1" w="$2"
+  case "$h" in
+    codex)
+      wait_for "$w" 'Ask Codex|OpenAI Codex' 30
+      pane_has "$w" 'trust|yes, continue' && { tmux send-keys -t "$w" Enter; sleep 3; }
+      ;;
+    claude)
+      wait_for "$w" 'Claude Code' 30
+      pane_has "$w" 'trust' && { tmux send-keys -t "$w" Down Enter; sleep 4; }
+      submit_prompt claude "$w" "/coordinator"
+      sleep 5
+      # the boot turn runs detect/plan; take "switch to auto mode" (option 3)
+      pane_has "$w" 'switch to auto mode|requires approval|Do you want to proceed' \
+        && { tmux send-keys -t "$w" Down Down Enter; sleep 5; }
+      ;;
+    opencode)
+      wait_for "$w" 'opencode|Build' 30
+      ;;
+    pi)
+      wait_for "$w" 'tinyproj|\bpi\b' 20
+      # the session picker in front: Enter opens a new chat
+      pane_has "$w" 'Resume Session|Current Folder' && { tmux send-keys -t "$w" Enter; sleep 2; }
+      ;;
+  esac
+  return 0
+}
+
 if [ "$SEND" = 1 ]; then
-  echo "== waiting ${SEND_DELAY}s for TUIs to boot, then sending the prompt =="
+  echo "== waiting ${SEND_DELAY}s for TUIs to boot, then sending the prompt (verified) =="
   sleep "$SEND_DELAY"
   for h in $HARNESSES; do
     widx="$(cat "$RES/$h.window" 2>/dev/null || tmux display -t "coord-$h" -p '#{window_index}' 2>/dev/null)"
+    boot_harness "$h" "$widx" || echo "  WARN: coord-$h did not look ready"
+    submit_prompt "$h" "$widx" "$PROMPT"
     if [ "$h" = claude ]; then
-      tmux send-keys -t "$widx" Down Enter   # trust dialog: "Yes, I trust this folder"
+      # a lingering suggestion menu also eats the submit; dismiss and resend
       sleep 4
-      tmux send-keys -t "$widx" -- "/coordinator" Enter
-      sleep 4
-    elif [ "$h" = codex ]; then
-      tmux send-keys -t "$widx" Enter        # trust dialog: "1. Yes, continue"
-      sleep 4
+      if pane_has "$widx" 'Type something|Chat about this'; then
+        tmux send-keys -t "$widx" Escape; sleep 1
+        submit_prompt claude "$widx" "$PROMPT"
+      fi
     fi
-    tmux send-keys -t "$widx" -- "$PROMPT" Enter
     echo "sent prompt to coord-$h (window $widx)"
   done
 fi

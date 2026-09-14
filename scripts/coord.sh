@@ -101,6 +101,11 @@ read -r session sid_src < <(resolve_session "$session") || {
 }
 
 mkdir -p "$repo/.coordinator"
+# normalize before recording: a codex rollout-derived id can arrive with a
+# rollout- prefix or a leading ISO timestamp, which `codex queue --thread`
+# rejects ("no active session found"). store the bare id.
+session="${session#rollout-}"
+session="$(printf '%s' "$session" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}-//')"
 printf '%s\n' "$session" > "$repo/.coordinator/session"
 
 printf 'SESSION %s source=%s harness=%s repo=%s\n' "$session" "$sid_src" "$harness" "$repo"
