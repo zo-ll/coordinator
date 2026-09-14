@@ -22,6 +22,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/queue.sh"
+
 COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
 STALE_MIN="${COORD_STALE_MIN:-15}"
 
@@ -32,6 +34,7 @@ case "$STALE_MIN" in
     ;;
 esac
 stale_secs=$(( STALE_MIN * 60 ))
+
 
 alive() { [ -n "$1" ] && [ "$1" != "-" ] && kill -0 "$1" 2>/dev/null; }
 

@@ -18,7 +18,13 @@
 #                     runs as ONE atomic transaction under this lock
 set -euo pipefail
 
-COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
+# Shared runtime-root initialization; sourcing this file does not run the queue.
+if [ "${COORD_ROOT+x}" != x ]; then
+  repo_slug="$(printf '%s' "${COORD_REPO:-$PWD}" | sed 's/[^[:alnum:]_.-]/-/g; s/^-*//; s/-*$//')"
+  printf -v COORD_ROOT '/tmp/%s/%s' coordinator "${repo_slug:-root}"
+fi
+export COORD_ROOT
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 Q="$COORD_ROOT/queue"
 INFLIGHT="$Q/.inflight"
 DONE="$Q/.done"
