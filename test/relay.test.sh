@@ -23,17 +23,18 @@ export COORD_RESUME="$TMP/fake-resume|__SESSION__|__BATCH__"
 assert() { [ "$1" = "$2" ] || { echo "  assert failed: '$1' != '$2'"; exit 1; }; }
 
 # __SERVER__ placeholder substitution from COORD_OPENCODE_SERVER (opencode attach wake)
-# isolated root: --once only exits after processing a wave, so give it one
+# isolated root + own log: --once only exits after processing a wave
 cat > "$TMP/server-resume" <<'EOF'
 #!/usr/bin/env bash
-printf 'RAW:%s\n' "$*" >> "$RELAY_LOG"
+printf 'RAW:%s\n' "$*" >> "$SERVER_LOG"
 EOF
 chmod +x "$TMP/server-resume"
+export SERVER_LOG="$TMP/server.log"
 export COORD_ROOT="$TMP/root2"
 "$QUEUE" enqueue srv 'DONE srv: done' >/dev/null
 COORD_RESUME="$TMP/server-resume|--attach|__SERVER__|__SESSION__|__BATCH__" \
   COORD_OPENCODE_SERVER="http://127.0.0.1:45111" "$RELAY" --once --interval 0.2
-server_line="$(tail -1 "$RELAY_LOG")"
+server_line="$(cat "$TMP/server.log")"
 case "$server_line" in
   *"--attach http://127.0.0.1:45111"*) ;;
   *) echo "  __SERVER__ not substituted: $server_line"; exit 1 ;;
