@@ -24,7 +24,6 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/queue.sh"
 
-COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
 STALE_MIN="${COORD_STALE_MIN:-15}"
 
 case "$STALE_MIN" in
