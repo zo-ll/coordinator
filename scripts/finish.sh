@@ -42,6 +42,25 @@ case "$base" in
     ;;
 esac
 
+# A critic's --result is a claim, not a fact: when the critic supplied a
+# structured verdict (.scratch/verdict.md), the result is derived from it
+# deterministically (issue #9), so a stated pass with a high finding never
+# reaches the queue. Without a verdict file (legacy fixtures, non-schema
+# critics) the stated result is kept.
+verdict_suffix=""
+if [ "$role" = "critic" ] && [ -f "$PWD/.scratch/verdict.md" ]; then
+  verdict_out="$("$HERE/compute-verdict.sh" "$PWD" "$event")"
+  derived_result="$(printf '%s\n' "$verdict_out" | sed -n 's/^RESULT //p')"
+  derived_rollup="$(printf '%s\n' "$verdict_out" | sed -n 's/^ROLLUP //p')"
+  if [ "$derived_result" != "$result" ]; then
+    echo "finish.sh: stated --result '$result' does not match derived verdict '$derived_result' (from $PWD/.scratch/verdict.md)" >&2
+    exit 2
+  fi
+  if [ "$derived_result" = "handback" ] && [ -n "$derived_rollup" ]; then
+    verdict_suffix=": $derived_rollup"
+  fi
+fi
+
 markers="${COORD_MARKERS:-$PWD/.scratch/status}"
 mkdir -p "$markers"
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -49,7 +68,7 @@ printf 'done TS=%s TASK=%s ROUND=%s ROLE=%s HEAD=%s RESULT=%s SUMMARY=%s\n' \
   "$ts" "$task" "$round" "$role" "$head" "$result" "$summary" > "$markers/$event.done"
 
 if [ "$role" = "critic" ]; then
-  line="VERDICT $task: $result @ $head — $summary"
+  line="VERDICT $task: $result$verdict_suffix @ $head — $summary"
 else
   line="DONE $task: $result — $summary"
 fi

@@ -1,0 +1,1 @@
+done TS=2026-09-14T14:32:24Z TASK=s1 ROUND=1 ROLE=worker HEAD=- RESULT=done SUMMARY=compute-verdict.sh derives pass/handback from findings+coverage; finish.sh enforces it for critics and adds severity rollup to VERDICT pings
