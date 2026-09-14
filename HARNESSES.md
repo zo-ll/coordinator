@@ -102,9 +102,14 @@ merge; `test_todo.sh` passes on main. Cost of admission:
 - repo `.claude/settings.local.json` (bypassPermissions) authored at boot;
 - the coordinator turn runs OUTSIDE the visible TUI — claude has no
   `queue`-into-live like codex; every wake is a hidden background process,
-  so **the user sees nothing** beyond the ledger (status.sh). The approval
-  question was answered entirely inside the headless session (approvals/<id>
-  recorded). Visibility is the outstanding gap (separate issue).
+  so **the user sees nothing** beyond the ledger (status.sh). Fixed (issue
+  #14): the wake pointer no longer poses an open "should I merge?" — a
+  resumed turn surfaces any pending merge decision and ends the turn instead
+  of deciding it, and `coord.sh approve <id>` (the only writer of
+  `approvals/<id>`) refuses under `COORD_HEADLESS=1`, so a headless turn can
+  never record approval for its own merge. Approval only ever comes from a
+  human running `coord.sh approve` in their own terminal. Visibility beyond
+  the ledger remains the outstanding gap (separate issue).
 
 ---
 

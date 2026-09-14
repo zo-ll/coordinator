@@ -11,6 +11,13 @@
 # harness's own current session (pi: $PI_SESSION_ID; codex: the newest rollout
 # in $CODEX_HOME/sessions, i.e. the live TUI session at boot). If none can be
 # resolved, coord fails loudly instead of recording a fake id.
+#
+#   coord.sh approve <id>   -> APPROVED <id>
+#
+# approve is the ONLY writer of $COORD_ROOT/approvals/<id> (merge.sh's gate).
+# It refuses under COORD_HEADLESS=1 — a resumed headless coordinator turn runs
+# with that set and can never call it successfully, so a turn cannot record
+# approval for its own merge question. Run it from a human's own terminal.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +26,19 @@ COORD_HOME="${COORD_HOME:-$HOME/.coordinator}"
 ENV_CONF="${COORD_ENV_CONF:-$COORD_HOME/env.conf}"
 COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
 repo="${COORD_REPO:-$PWD}"
+
+if [ "${1:-}" = "approve" ]; then
+  shift
+  slice="${1:?coord.sh approve: slice id required}"
+  if [ "${COORD_HEADLESS:-0}" = "1" ]; then
+    echo "coord: refusing to record approval for '$slice' — this is a headless resumed turn (COORD_HEADLESS=1); a coordinator turn may never approve its own merge. Run 'coord.sh approve $slice' from a human's own terminal." >&2
+    exit 1
+  fi
+  mkdir -p "$COORD_ROOT/approvals"
+  : > "$COORD_ROOT/approvals/$slice"
+  printf 'APPROVED %s\n' "$slice"
+  exit 0
+fi
 
 harness=""
 session=""

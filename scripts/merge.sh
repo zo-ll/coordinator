@@ -27,6 +27,11 @@ while [ $# -gt 0 ]; do
     *) echo "merge.sh: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+# approval integrity (issue #14): a headless coordinator resume must never
+# merge on its own, even when an approvals file exists — only a human (or the
+# interactive coordinator acting on one) may merge.
+[ -z "${COORD_HEADLESS:-}" ] || { echo "merge: refusing to merge under COORD_HEADLESS=1 (a human must approve via \`coord approve <id>\`)" >&2; exit 1; }
+
 [ -n "$slice" ] || { echo "merge.sh: --slice is required" >&2; exit 2; }
 
 verdict="$("$STATE" get "$slice" verdict 2>/dev/null || true)"
