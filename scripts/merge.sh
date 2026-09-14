@@ -80,8 +80,13 @@ fi
 sha="$(git -C "$repo" rev-parse HEAD)"
 "$STATE" merged "$slice" "$sha" >/dev/null
 printf 'MERGE %s base=%s sha=%s\n' "$slice" "$base" "$sha"
-if git -C "$repo" remote | grep -qx origin; then
-  if git -C "$repo" push origin "$base" >/dev/null 2>&1; then
-    printf 'PUSH %s -> origin/%s\n' "$base" "$base"
+# push what we actually merged INTO (the checked-out branch), not the base:
+# the merge lands on the current branch, so report and push that ref truthfully
+cur="$(git -C "$repo" branch --show-current 2>/dev/null || true)"
+if [ -n "$cur" ] && git -C "$repo" remote | grep -qx origin; then
+  if git -C "$repo" push origin "$cur" >/dev/null 2>&1; then
+    printf 'PUSH %s -> origin/%s\n' "$cur" "$cur"
+  else
+    echo "merge: merged locally, but push to origin/$cur failed (run \`git push origin $cur\` to publish)" >&2
   fi
 fi

@@ -130,7 +130,14 @@ launch() {
     . "$a"
     if ADAPTER_NAME="$role" adapter_launch "$wt" "$log" "$@"; then return 0; fi
   done
-  ( cd "$wt" && setsid "$@" >>"$log" 2>&1 & echo $! )
+  # core launcher: background with full fd isolation (stdin closed, stdout+stderr
+  # to the log) and the pid written to a file, so the caller's command
+  # substitution never waits on the job — a child holding a pipe fd hangs
+  # spawn.sh (observed with codex exec).
+  local pidfile="$log.pid"
+  rm -f "$pidfile"
+  ( cd "$wt" && setsid "$@" </dev/null >>"$log" 2>&1 & echo $! > "$pidfile" )
+  cat "$pidfile"
 }
 
 pid="$(launch "$wt" "$log" "${argv[@]}")"
