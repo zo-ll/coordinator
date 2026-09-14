@@ -17,13 +17,14 @@ CONFIG="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
 COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
 adapters_dir="${COORD_ADAPTERS:-$HERE/../adapters}"
 
-role=""; prompt=""; wt=""; slice=""
+role=""; prompt=""; wt=""; slice=""; preview=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --role)     role="$2";   shift 2 ;;
     --prompt)   prompt="$2"; shift 2 ;;
     --worktree) wt="$2";     shift 2 ;;
     --slice)    slice="$2";  shift 2 ;;
+    --preview)  preview=true; shift ;;
     *) echo "spawn.sh: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -45,6 +46,24 @@ case "$role" in
   worker)     hkey=lane.default.harness; mkey=lane.default.model ;;
   *) echo "spawn.sh: unknown role: $role" >&2; exit 2 ;;
 esac
+
+if [ "$role" = critic ]; then
+  . "$HERE/rules.sh"
+  base="$("$CFG" get "$CONFIG" merge.base 2>/dev/null || true)"
+  base=${base:-main}
+  COORD_CHANGES="$(changed_files "$wt" "$base")"
+  excluded="$("$HERE/filter-diff.sh" "$wt" "$base")"
+  rules="$("$HERE/rules.sh" "$wt" "$base")"
+  # Keep assembly outside the worktree so repeated previews cannot add files
+  # to their own changed-file set. invoke.sh supplies the preamble.
+  assembly="$(mktemp)"
+  trap 'rm -f "$assembly" "$assembly.finish"' EXIT
+  cat "$prompt" > "$assembly"
+  printf '\n## Changed files\n%s\n' "$COORD_CHANGES" >> "$assembly"
+  if [ -n "$excluded" ]; then printf '\n## Excluded\n%s\n' "$excluded" >> "$assembly"; fi
+  if [ -n "$rules" ]; then printf '\n%s\n' "$rules" >> "$assembly"; fi
+  prompt=$assembly
+fi
 
 # The finish contract is MECHANICAL: it must not depend on the coordinator
 # remembering to write it. Append the exact contract to the brief so every
@@ -84,6 +103,14 @@ mapfile -d '' -t argv < <("$INVOKE" "$h" "$role" "$prompt" "$wt" "$m")
   echo "spawn.sh: no argv for role '$role' (harness '$h'): check the exec recipe and the brief" >&2
   exit 1
 }
+
+if [ "$role" = critic ]; then argv=(env "COORD_CHANGES=$COORD_CHANGES" "${argv[@]}"); fi
+if [ "$preview" = true ]; then
+  # One shell-quoted argv line includes the exact prompt and launch env.
+  printf '%q ' "${argv[@]}"
+  printf '\n'
+  exit 0
+fi
 
 logdir="$COORD_ROOT/log"
 mkdir -p "$logdir"
