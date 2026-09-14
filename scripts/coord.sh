@@ -17,7 +17,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFG="$HERE/cfg.sh"
 COORD_HOME="${COORD_HOME:-$HOME/.coordinator}"
 ENV_CONF="${COORD_ENV_CONF:-$COORD_HOME/env.conf}"
-COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
+source "$HERE/queue.sh"
 repo="${COORD_REPO:-$PWD}"
 
 harness=""

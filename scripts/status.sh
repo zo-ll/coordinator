@@ -12,7 +12,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
+source "$HERE/queue.sh"
 
 alive() { [ -n "$1" ] && [ "$1" != "-" ] && kill -0 "$1" 2>/dev/null; }
 

@@ -31,7 +31,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
+source "$HERE/queue.sh"
 QUEUE="$HERE/queue.sh"
 
 once=0

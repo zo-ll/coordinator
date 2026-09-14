@@ -1,0 +1,1 @@
+done TS=2026-09-14T14:36:17Z TASK=s5 ROUND=1 ROLE=worker HEAD=- RESULT=done SUMMARY=Shared per-repository runtime roots with verbatim overrides and isolation tests; suite passes with COORD_WORKTREES unset
