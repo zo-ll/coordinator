@@ -25,7 +25,9 @@
 #
 # The resume command is config data (never eval'd):
 #   $COORD_CONFIG (default <cwd>/.coordinator/config.conf) keys:
-#     relay.resume   '|'-separated argv template with __SESSION__ and __BATCH__
+#     relay.resume   '|'-separated argv template with __SESSION__, __BATCH__
+#                    and __SERVER__ (the latter from $COORD_OPENCODE_SERVER,
+#                    used by opencode's attach-based wake)
 #     relay.session  session id/name to resume
 # Overrides: COORD_RESUME, COORD_SESSION.
 set -euo pipefail
@@ -78,10 +80,12 @@ resume() { # pointer
     return 1
   }
   session="$(session_id)"
+  local server="${COORD_OPENCODE_SERVER:-}"
   IFS='|' read -r -a argv <<< "$recipe"
   for i in "${!argv[@]}"; do
     argv[$i]="${argv[$i]//__BATCH__/$pointer}"
     argv[$i]="${argv[$i]//__SESSION__/$session}"
+    argv[$i]="${argv[$i]//__SERVER__/$server}"
   done
   "${argv[@]}"
 }

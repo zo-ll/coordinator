@@ -47,11 +47,15 @@ mkdir -p "$RES"
 # full permissions: pre-seed trust so TUIs never sit at a dialog (codex via
 # config.toml trust_level; claude via ~/.claude.json trustEnabled - the claude
 # dialog may still appear, create-sandbox auto-answers it below)
-{
-  for h in codex claude opencode pi; do
-    printf '\n[projects."%s/%s/tinyproj"]\ntrust_level = "trusted"\n' "$ROOT" "$h"
-  done
-} >> "$HOME/.codex/config.toml"
+# NOTE: append idempotently - TOML rejects duplicate [projects.*] keys, and a
+# duplicate made codex refuse to start on the very first boot.
+if ! grep -q "\[projects\.\"$ROOT/" "$HOME/.codex/config.toml" 2>/dev/null; then
+  {
+    for h in codex claude opencode pi; do
+      printf '\n[projects."%s/%s/tinyproj"]\ntrust_level = "trusted"\n' "$ROOT" "$h"
+    done
+  } >> "$HOME/.codex/config.toml"
+fi
 python3 - "$ROOT" <<'PY'
 import json,sys
 p='/home/andrea/.claude.json'
@@ -107,12 +111,28 @@ for h in $HARNESSES; do
       [ -e "$BIN/$b" ] || ln -s "$f" "$BIN/$b" 2>/dev/null || true
     done
   done
+  OC_SERVER=""
   case "$h" in
-    codex)   ln -s "$(command -v codex)"    "$BIN/codex";   ln -s "$(command -v node)" "$BIN/node"; LAUNCH="codex -s workspace-write -c model=\"$CODEX_MODEL\"" ;;
-    claude)  ln -s "$(command -v claude)"   "$BIN/claude";  LAUNCH="claude --model $CLAUDE_MODEL" ;;
-    opencode) ln -s "$(command -v opencode)" "$BIN/opencode"; LAUNCH="opencode" ;;
-    pi)      ln -s "$(command -v pi)"       "$BIN/pi"; ln -s "$(command -v node)" "$BIN/node"; LAUNCH="pi" ;;
+    codex)   ln -s "$(command -v codex)"    "$BIN/codex";   ln -s "$(command -v node)" "$BIN/node"; LAUNCH="codex -c model=\"$CODEX_MODEL\""; MODEL="$CODEX_MODEL" ;;
+    claude)  ln -s "$(command -v claude)"   "$BIN/claude";  LAUNCH="claude --model $CLAUDE_MODEL"; MODEL="$CLAUDE_MODEL" ;;
+    opencode) ln -s "$(command -v opencode)" "$BIN/opencode"; LAUNCH="opencode --auto --port 45111"; OC_SERVER="http://127.0.0.1:45111"; MODEL="" ;;
+    pi)      ln -s "$(command -v pi)"       "$BIN/pi"; ln -s "$(command -v node)" "$BIN/node"; LAUNCH="pi"; MODEL="" ;;
   esac
+
+  # per-harness sandbox HOME: every shell the agent spawns reads envpin
+  # (BASH_ENV) or .profile/.bashrc, so PATH stays the fake farm and detect.sh
+  # can only ever see THIS harness. Agent config/state dirs (incl. credentials
+  # under .local/share) are symlinked in, so accounts, trust, models and skills
+  # still resolve.
+  cat > "$D/home/envpin" <<PIN
+export PATH="$BIN"
+export COORD_OPENCODE_SERVER="$OC_SERVER"
+PIN
+  cp "$D/home/envpin" "$D/home/.bashrc"
+  cp "$D/home/envpin" "$D/home/.profile"
+  for c in .codex .claude .claude.json .agents .pi .opencode .gitconfig .config .local .cache; do
+    [ -e "$HOME/$c" ] && ln -sfn "$HOME/$c" "$D/home/$c" 2>/dev/null || true
+  done
 
   # isolated repo with the protocol hook
   ( cd "$D/tinyproj" &&
@@ -120,7 +140,9 @@ for h in $HARNESSES; do
     printf '%s\n' 'During any multi-part work (coordinate/delegate/dispatch), follow the' \
       'coordinator protocol in /home/andrea/personal/coordinator/SKILL.md exactly.' > AGENTS.md &&
     echo "tiny project" > README.md &&
-    git add -A && git commit -q -m init &&
+    mkdir -p .claude &&
+    printf '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  }\n}\n' > .claude/settings.local.json &&
+    git add -A && git add -f .claude/settings.local.json && git commit -q -m init &&
     git branch -m main )
 
   printf '%s\n' "$PROMPT" > "$D/prompt.txt"
@@ -132,11 +154,11 @@ for h in $HARNESSES; do
   mkdir -p "$cd"
   cat > "$cd/config.conf" <<CFG
 critic.harness=$h
-critic.model=
+critic.model=$MODEL
 researcher.harness=$h
-researcher.model=
+researcher.model=$MODEL
 lane.default.harness=$h
-lane.default.model=
+lane.default.model=$MODEL
 routing.mechanical=default
 routing.risky=default
 autonomy=auto-merge
@@ -149,7 +171,7 @@ CFG
   # stable index for sending/poking)
   tmux kill-window -t "coord-$h" 2>/dev/null || true
   widx="$(tmux new-window -d -P -F '#{window_index}' -n "coord-$h" -c "$D/tinyproj" \
-    "bash --noprofile --norc -c 'printf \"SANDBOX ($h): no tmux, single harness — prompt will be auto-sent\\\\n\\\\n\"; env PATH=$BIN COORD_HOME=$D/home COORD_ROOT=$D/root $LAUNCH'")"
+    "bash --noprofile --norc -c 'printf \"SANDBOX ($h): no tmux, single harness — prompt will be auto-sent\\\\n\\\\n\"; env HOME=$D/home BASH_ENV=$D/home/envpin PATH=$BIN COORD_HOME=$D/home COORD_ROOT=$D/root COORD_OPENCODE_SERVER=$OC_SERVER $LAUNCH'")"
   echo "$widx" > "$RES/$h.window"
 
   # separate watcher registering results
