@@ -55,6 +55,7 @@ case "$line" in
   *) echo "  session not passed: $line"; exit 1 ;;
 esac
 batch="${line##*WAKE batch=}"
+batch="${batch%% —*}"
 [ -f "$batch" ] || { echo "  batch file missing: $batch"; exit 1; }
 assert "$(grep -c '^EVENT ' "$batch")" "20"
 

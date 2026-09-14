@@ -1,0 +1,1 @@
+done TS=2026-09-14T14:37:49Z TASK=s4 ROUND=1 ROLE=worker HEAD=- RESULT=done SUMMARY=Wake text now surfaces merge decisions instead of asking; coord.sh approve is the sole, COORD_HEADLESS-guarded writer of approvals/<id>; new approval.test.sh covers both paths

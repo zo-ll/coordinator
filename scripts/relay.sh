@@ -19,6 +19,11 @@
 # redelivery (see the coordinator rule: never re-spawn a critic for a slice
 # already under review).
 #
+# The wake pointer never phrases an open yes/no question (a resumed turn must
+# not be able to answer its own "should I merge?"): it tells the coordinator
+# to surface any pending merge decision for the human and end the turn.
+# Approval is recorded only by a human running `coord.sh approve <id>`.
+#
 # Exactly one relay per COORD_ROOT: a non-blocking flock guards the loop, and a
 # fresh relay.pid is written (self-cleaned on exit) so a stale pid cannot point
 # at a dead process.
@@ -109,7 +114,7 @@ deliver() { # batch: retry resume with backoff, ack on success, give up loudly
   local batch="$1" attempt=0 wait="$backoff"
   while :; do
     attempt=$(( attempt + 1 ))
-    if resume "WAKE batch=$batch"; then
+    if resume "WAKE batch=$batch — route each event; if a merge decision is due, do not decide it yourself: surface it for the human and end the turn. Approval can only come from a human running 'coord.sh approve <id>' in their own terminal — never from inside this turn."; then
       "$QUEUE" ack
       return 0
     fi
