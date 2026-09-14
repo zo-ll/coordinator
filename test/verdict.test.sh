@@ -14,6 +14,10 @@ new_wt() {
   n=$((n + 1))
   local wt="$TMP/wt-$n"
   mkdir -p "$wt/.scratch"
+  # fixture files: the FINDING fixtures quote text that MUST exist at the
+  # stated lines (position anchoring, issue #10)
+  printf 'foo\nignored line\nbar\n' > "$wt/a.txt"
+  printf 'baz\n' > "$wt/b.txt"
   printf '%s' "$wt"
 }
 

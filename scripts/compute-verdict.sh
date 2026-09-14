@@ -19,6 +19,8 @@
 # severity) — never guesses.
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 worktree="${1:?usage: compute-verdict.sh <worktree> <slice>}"
 slice="${2:?usage: compute-verdict.sh <worktree> <slice>}"
 : "$slice" # reserved for future per-slice verdict paths; unused for now
@@ -32,11 +34,13 @@ verdict_file="$worktree/.scratch/verdict.md"
 declare -A found_paths
 declare -A covered_paths
 crit=0 high=0 med=0 low=0
+findings=0
 coverage_hole=0
 
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
     FINDING\ *)
+      findings=$((findings + 1))
       rest="${line#FINDING }"
       path_range="${rest%% *}"
       path="${path_range%%:*}"
@@ -110,4 +114,10 @@ if [ "$coverage_hole" -eq 1 ]; then
   echo "COVERAGE hole"
 else
   echo "COVERAGE ok"
+fi
+# position anchoring (issue #10): surface unverifiable quotes same-line. only
+# when findings exist; the standalone verify-quotes.sh prints the detail.
+if [ "$findings" -gt 0 ]; then
+  "$HERE/verify-quotes.sh" "$worktree" "$verdict_file" 2>/dev/null \
+    | grep '^QUOTES ' || true
 fi

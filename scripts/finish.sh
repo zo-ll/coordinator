@@ -59,6 +59,15 @@ if [ "$role" = "critic" ] && [ -f "$PWD/.scratch/verdict.md" ]; then
   if [ "$derived_result" = "handback" ] && [ -n "$derived_rollup" ]; then
     verdict_suffix=": $derived_rollup"
   fi
+  # position anchoring (issue #10): carry unverifiable quotes in the line the
+  # relay sees, so the coordinator can react without reading prose
+  quotes="$(printf '%s\n' "$verdict_out" | sed -n 's/^QUOTES //p')"
+  if [ -n "$quotes" ] && [ "$quotes" != "n/a" ]; then
+    missing="$(printf '%s' "$quotes" | sed -n 's/^verified=[0-9]* shifted=[0-9]* missing=\([0-9]*\).*/\1/p')"
+    if [ -n "$missing" ] && [ "$missing" -gt 0 ] 2>/dev/null; then
+      verdict_suffix="${verdict_suffix:+$verdict_suffix, }$missing unverified quote$([ "$missing" = 1 ] || echo s)"
+    fi
+  fi
 fi
 
 markers="${COORD_MARKERS:-$PWD/.scratch/status}"
