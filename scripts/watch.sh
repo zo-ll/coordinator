@@ -12,7 +12,9 @@
 #
 # Ctrl-C stops watching; processes keep running. `scripts/status.sh --watch`
 # is the summary-only variant.
-set -euo pipefail
+set -uo pipefail
+# No set -e: a dashboard loop must survive transient glitches (empty logs,
+# SIGPIPE from early-close heads). Failures below are guarded individually.
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 interval=3
@@ -38,16 +40,16 @@ while :; do
   for root in "${roots[@]}"; do
     [ -d "$root" ] || { echo "── $root ──  (missing)"; continue; }
     echo "── $root ──"
-    env COORD_ROOT="$root" "$HERE/status.sh" 2>/dev/null | head -8
+    env COORD_ROOT="$root" "$HERE/status.sh" 2>/dev/null | head -8 || true
     turn="$root/turn.log"; [ -f "$turn" ] || turn="$root/relay.log"
     if [ -f "$turn" ]; then
       echo "  coordinator voice:"
-      tail -n "$tail_n" "$turn" | grep -v '^$' | tail -n "$tail_n" | sed 's/^/    /'
+      tail -n "$tail_n" "$turn" | grep -v '^$' | tail -n "$tail_n" | sed 's/^/    /' || true
     fi
-    newest="$(ls -t "$root"/log/worker.*.log "$root"/log/critic.*.log 2>/dev/null | head -1)"
+    newest="$(ls -t "$root"/log/worker.*.log "$root"/log/critic.*.log 2>/dev/null | head -1 || true)"
     if [ -n "$newest" ]; then
       echo "  $(basename "$newest"):"
-      tail -n 3 "$newest" | grep -v '^\[COORD\]' | sed 's/^/    /'
+      tail -n 3 "$newest" | grep -v '^\[COORD\]' | sed 's/^/    /' || true
     fi
   done
   sleep "$interval"
