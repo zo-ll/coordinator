@@ -115,10 +115,27 @@ for h in $HARNESSES; do
     done
   done
   OC_SERVER=""
+  OC_XDG=""
   case "$h" in
     codex)   ln -s "$(command -v codex)"    "$BIN/codex";   ln -s "$(command -v node)" "$BIN/node"; LAUNCH="codex -c model=\"$CODEX_MODEL\""; MODEL="$CODEX_MODEL" ;;
     claude)  ln -s "$(command -v claude)"   "$BIN/claude";  LAUNCH="claude --model $CLAUDE_MODEL"; MODEL="$CLAUDE_MODEL" ;;
-    opencode) ln -s "$(command -v opencode)" "$BIN/opencode"; LAUNCH="opencode --auto --port 45111"; OC_SERVER="http://127.0.0.1:45111"; MODEL="" ;;
+    opencode) ln -s "$(command -v opencode)" "$BIN/opencode"; LAUNCH="opencode --auto --port 45111"; OC_SERVER="http://127.0.0.1:45111"; OC_XDG="$D/xdgconfig"; MODEL=""
+      # sandbox-local config: attach-woken/headless turns need permission rules
+      # (project opencode.json is not used by 'opencode run'), without touching
+      # the user's global config
+      mkdir -p "$OC_XDG/opencode"
+      cat > "$OC_XDG/opencode/opencode.json" <<OC
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "~/.agents/skills/caveman/SKILL.md",
+    "~/.agents/skills/coordinator/SKILL.md"
+  ],
+  "permission": { "tools": { "read": "allow", "write": "allow", "edit": "allow", \
+    "bash": "allow", "glob": "allow", "grep": "allow", "list": "allow" } }
+}
+OC
+      ;;
     pi)      ln -s "$(command -v pi)"       "$BIN/pi"; ln -s "$(command -v node)" "$BIN/node"; LAUNCH="pi"; MODEL="" ;;
   esac
 
@@ -130,10 +147,19 @@ for h in $HARNESSES; do
   cat > "$D/home/envpin" <<PIN
 export PATH="$BIN"
 export COORD_OPENCODE_SERVER="$OC_SERVER"
+export XDG_CONFIG_HOME="$OC_XDG"
 PIN
   cp "$D/home/envpin" "$D/home/.bashrc"
   cp "$D/home/envpin" "$D/home/.profile"
-  for c in .codex .claude .claude.json .agents .pi .opencode .gitconfig .config .local .cache; do
+  for c in .codex .claude .claude.json .agents .pi .opencode .gitconfig; do
+    [ -e "$HOME/$c" ] && ln -sfn "$HOME/$c" "$D/home/$c" 2>/dev/null || true
+  done
+  # Targeted state/config only. A wholesale .local/.config symlink lets an
+  # agent's self-update rewrite the REAL home (observed: claude repointed
+  # ~/.local/bin/claude at the sandbox on 2025-09-15). Only the paths the
+  # harnesses genuinely need are shared; everything else stays sandbox-local.
+  mkdir -p "$D/home/.local/share" "$D/home/.config"
+  for c in .local/share/opencode .config/opencode .config/git; do
     [ -e "$HOME/$c" ] && ln -sfn "$HOME/$c" "$D/home/$c" 2>/dev/null || true
   done
 
