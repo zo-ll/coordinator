@@ -69,6 +69,22 @@ Make the coordinator a barebones, environment-independent loop of **bash** scrip
 
 ## Implementation Decisions
 
+**Observable execution (current behavior).** Lifecycle scripts keep their
+stdout contracts and emit timestamped START/OK/WAIT/WARN/FAIL records on stderr
+and under `$COORD_ROOT/progress.log`. Detached roles are supervised to report
+nonzero exits and missing completion markers. `status.sh --watch` supplies a
+plain-terminal view; adapters remain optional. A successful wake-command exit
+is labelled separately from routing completion. `coord.sh approve` currently
+only writes an approval marker, so a coordinator turn must still be triggered
+to perform the merge. These diagnostics expose that implementation gap in the
+event-flow design below; they do not fix delivery semantics.
+
+**Single-harness default (current behavior).** New proposals use the current
+spawnable harness (otherwise the first spawnable harness) for every role,
+regardless of how many others are installed. No second lane is proposed.
+Existing configuration choices remain intact. Simultaneous multi-harness
+sandbox runs are compatibility tests, not a normal-run requirement.
+
 **Coordinator identity.** The coordinator is the current session/harness. `detect.sh` records it in `env.conf` as `current` with `current_source` (`env` | `ancestor` | `user`); it is never asked, never configurable, and never spawned. `current` and `spawnable` are separate facts: the role map draws only from spawnable harnesses.
 
 **Config format and access.** Flat `key=value`, dotted keys, two scopes:

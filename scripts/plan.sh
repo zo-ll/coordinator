@@ -11,6 +11,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/progress.sh"
+progress_start plan
 CFG="$HERE/cfg.sh"
 COORD_HOME="${COORD_HOME:-$HOME/.coordinator}"
 ENV_CONF="${COORD_ENV_CONF:-$COORD_HOME/env.conf}"
@@ -34,6 +36,7 @@ if [ -f "$CONFIG" ]; then
     "$("$CFG" get "$CONFIG" tracker 2>/dev/null || echo -)" \
     "$("$CFG" get "$CONFIG" adapters 2>/dev/null || echo -)"
   printf 'ASK\n'
+  progress_note="reusing config=$CONFIG; no setup answers needed"
   exit 0
 fi
 
@@ -47,11 +50,8 @@ default="${sp[0]}"
 for h in "${sp[@]}"; do [ "$h" = "$current" ] && default="$h"; done
 
 critic="$default"; researcher="$default"; lane_default="$default"
-lane_strong="" ; routing_risky="default"
-if [ "${#sp[@]}" -gt 1 ]; then
-  for h in "${sp[@]}"; do [ "$h" != "$default" ] && lane_strong="$h" && break; done
-  [ -n "$lane_strong" ] && routing_risky="strong"
-fi
+# One harness serves all roles even if others are installed. The multi-harness
+# sandbox is a compatibility test, not a reason to introduce another lane.
 
 tmux="$(get tmux)"; gh="$(get gh)"
 
@@ -63,11 +63,7 @@ tmux="$(get tmux)"; gh="$(get gh)"
 "$CFG" set "$PROPOSAL" lane.default.harness "$lane_default"
 "$CFG" set "$PROPOSAL" lane.default.model ""
 "$CFG" set "$PROPOSAL" routing.mechanical default
-"$CFG" set "$PROPOSAL" routing.risky "$routing_risky"
-if [ -n "$lane_strong" ]; then
-  "$CFG" set "$PROPOSAL" lane.strong.harness "$lane_strong"
-  "$CFG" set "$PROPOSAL" lane.strong.model ""
-fi
+"$CFG" set "$PROPOSAL" routing.risky default
 "$CFG" set "$PROPOSAL" autonomy approve-merge
 "$CFG" set "$PROPOSAL" tracker local
 "$CFG" set "$PROPOSAL" adapters none
@@ -75,17 +71,14 @@ fi
 # ASK block: concrete keys with proposed values, so the coordinator can present
 # a real question. Empty model value = "harness default" (the user must confirm).
 ask=()
-if [ "${#sp[@]}" -gt 1 ]; then
-  ask+=("critic.harness=$critic" "researcher.harness=$researcher" "lane.default.harness=$lane_default")
-  [ -n "$lane_strong" ] && ask+=("lane.strong.harness=$lane_strong")
-fi
 ask+=("critic.model=" "researcher.model=" "lane.default.model=")
-[ -n "$lane_strong" ] && ask+=("lane.strong.model=")
 ask+=("autonomy=approve-merge")
 [ "$tmux" = 1 ] && ask+=("adapters=none")
 [ "$gh" = 1 ] && ask+=("tracker=local")
 
 printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=approve-merge tracker=local adapters=none\n' \
-  "$critic" "$researcher" "$lane_default" "${lane_strong:-none}"
+  "$critic" "$researcher" "$lane_default" none
 printf 'ASK\n'
 for l in "${ask[@]}"; do printf '  %s\n' "$l"; done
+progress_result=WAIT
+progress_note="harness=$default for all roles; present ASK fields and wait for setup answers; adapters are opt-in"

@@ -10,6 +10,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/progress.sh"
+progress_start apply
 CFG="$HERE/cfg.sh"
 COORD_HOME="${COORD_HOME:-$HOME/.coordinator}"
 ENV_CONF="${COORD_ENV_CONF:-$COORD_HOME/env.conf}"
@@ -29,7 +31,7 @@ done
 [ -f "$PROPOSAL" ] || { echo "FAIL proposal: run plan.sh first" >&2; exit 1; }
 
 tmp="$(mktemp "${COORD_HOME}/config.XXXXXX")"
-trap 'rm -f "$tmp"' EXIT
+progress_cleanup() { rm -f "$tmp"; }
 cp "$PROPOSAL" "$tmp"
 
 for kv in $answers; do
@@ -52,5 +54,5 @@ done
 
 mkdir -p "$(dirname "$config")"
 mv -T -- "$tmp" "$config"
-trap - EXIT
+progress_note="config=$config written; harness binaries resolved (real execution not yet verified)"
 printf 'OK config=%s\n' "$config"

@@ -2,7 +2,7 @@
 # Config matrix under a controlled PATH:
 #   one harness  -> role map forced, no "roles" asked
 #   zero harness -> boot fails cleanly
-#   two harnesses-> role map asked, lane.strong proposed
+#   two harnesses-> one harness still serves every role
 #   no tmux/gh   -> adapters=none, tracker=local forced
 set -euo pipefail
 
@@ -24,7 +24,7 @@ make_bin() { # make_bin <harness...>  -> minimal PATH with core tools (+ fakes)
   rm -rf "$TMP/bin"
   mkdir -p "$TMP/bin"
   local c p
-  for c in bash ps tr seq awk mktemp mv cat cp dirname mkdir; do
+  for c in bash ps tr seq awk mktemp mv cat cp dirname mkdir sed flock rm; do
     p="$(tool "$c")" && ln -s "$p" "$TMP/bin/$c"
   done
   local h
@@ -69,17 +69,16 @@ fresh zero
 PATH="$TMP/bin" "$DETECT" >/dev/null
 if PATH="$TMP/bin" "$PLAN" >/dev/null 2>&1; then echo "  plan should fail with no spawnable harness"; exit 1; fi
 
-# --- two harnesses: role map asked, lane.strong proposed
+# --- two harnesses: no automatic second lane or role selection questions
 make_bin codex claude
 export COORD_KNOWN="codex claude"
 fresh two
 PATH="$TMP/bin" "$DETECT" >/dev/null
 out="$(PATH="$TMP/bin" "$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
-  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge tracker=local adapters=none"
+  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge tracker=local adapters=none"
 case "$(printf '%s\n' "$out" | tail -n +2)" in
-  *critic.harness=codex*lane.strong.harness=claude*) ;;
-  *) echo "  multi-harness ASK missing roles"; exit 1 ;;
+  *critic.harness=*|*lane.strong.*) echo "  unexpected multi-harness setup"; exit 1 ;;
 esac
 
 echo "  matrix ok"

@@ -41,6 +41,9 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/queue.sh"
+source "$HERE/progress.sh"
+progress_start relay
+progress_note="delivery stopped; inspect relay.log and run status.sh"
 QUEUE="$HERE/queue.sh"
 
 once=0
@@ -112,11 +115,13 @@ if ! flock -n 8; then
   exit 1
 fi
 printf '%s\n' "$$" > "$COORD_ROOT/relay.pid"
-trap 'rm -f "$COORD_ROOT/relay.pid"' EXIT
+progress_cleanup() { rm -f "$COORD_ROOT/relay.pid"; }
+progress_event OK "relay lock acquired; pid=$$ root=$COORD_ROOT"
 
 # reclaim events stranded by a previous relay crash: the lock guarantees no
 # other consumer exists, so anything in .inflight is ours to requeue.
 "$QUEUE" nack
+progress_event OK "recovery complete; stranded events returned to pending queue"
 
 deliver() { # batch: retry resume with backoff, ack on success, give up loudly
   local batch="$1" attempt=0 wait="$backoff" autonomy wake
@@ -130,30 +135,45 @@ deliver() { # batch: retry resume with backoff, ack on success, give up loudly
   fi
   while :; do
     attempt=$(( attempt + 1 ))
+    progress_phase wake "batch=$batch attempt=$attempt/$max_attempts; invoking configured wake command"
     if resume "$wake"; then
+      progress_event OK "wake command returned exit=0 batch=$batch; this alone does not prove coordinator routing completed"
+      progress_phase acknowledge "batch=$batch; acknowledging under the configured wake-command contract"
       "$QUEUE" ack
+      progress_event OK "batch=$batch queue acknowledged; check slice state for routing results"
       return 0
     fi
     if [ "$attempt" -ge "$max_attempts" ]; then
       "$QUEUE" nack
+      progress_event FAIL "batch=$batch wake failed $max_attempts times; events returned to queue; fix wake command and restart relay"
       echo "relay: resume failed $max_attempts times for $batch; returned the events to the queue and stopped (fix the resume recipe, then restart the relay)" >&2
       return 1
     fi
     echo "relay: resume failed (attempt $attempt/$max_attempts), retrying in ${wait}s" >&2
+    progress_event WARN "batch=$batch wake failed attempt=$attempt/$max_attempts; retry in ${wait}s"
     sleep "$wait"
     wait=$(( wait * 2 ))
     [ "$wait" -le 60 ] || wait=60
   done
 }
 
+waiting=0
 while :; do
   if "$QUEUE" pending; then
+    waiting=0
     batch="$COORD_ROOT/batch/$(date +%s%N).$$.txt"
-    if "$QUEUE" pop-batch "$batch" >/dev/null; then
+    progress_phase claim "batch=$batch"
+    if claimed="$("$QUEUE" pop-batch "$batch")"; then
+      progress_event OK "$claimed"
       deliver "$batch" || exit 1
-      if [ "$once" = 1 ]; then exit 0; fi
+      if [ "$once" = 1 ]; then progress_note="one batch delivered; relay stopped as requested by --once"; exit 0; fi
     fi
   else
+    if [ "$waiting" = 0 ]; then
+      progress_stage=queue
+      progress_event WAIT "queue empty; waiting for worker completion or a user event"
+      waiting=1
+    fi
     sleep "$interval"
   fi
 done

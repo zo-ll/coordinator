@@ -10,6 +10,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/progress.sh"
+progress_start finish
 
 event="" role="" result="" head="-" summary=""
 while [ $# -gt 0 ]; do
@@ -22,6 +24,7 @@ while [ $# -gt 0 ]; do
     *) echo "finish.sh: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+progress_context="event=${event:-missing} role=${role:-missing} result=${result:-missing}"
 [ -n "$event" ] && [ -n "$role" ] && [ -n "$result" ] || {
   echo "finish.sh: --event, --role and --result are required" >&2
   exit 2
@@ -71,6 +74,8 @@ if [ "$role" = "critic" ] && [ -f "$PWD/.scratch/verdict.md" ]; then
 fi
 
 markers="${COORD_MARKERS:-$PWD/.scratch/status}"
+progress_context="event=$event role=$role result=$result"
+progress_phase marker
 mkdir -p "$markers"
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf 'done TS=%s TASK=%s ROUND=%s ROLE=%s HEAD=%s RESULT=%s SUMMARY=%s\n' \
@@ -81,6 +86,10 @@ if [ "$role" = "critic" ]; then
 else
   line="DONE $task: $result — $summary"
 fi
-"$HERE/queue.sh" enqueue "$event" "$line" >/dev/null
+progress_event OK "completion marker written: $markers/$event.done"
+progress_phase enqueue
+enqueued="$("$HERE/queue.sh" enqueue "$event" "$line")"
+progress_note="$enqueued; completion published, coordinator processing is separate"
+case "$enqueued" in DUP\ *) progress_event WARN "duplicate event=$event suppressed; no new coordinator notification" ;; esac
 
 printf 'FINISH %s task=%s round=%s\n' "$event" "$task" "$round"

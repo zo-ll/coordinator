@@ -14,6 +14,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/progress.sh"
+progress_start merge
 CFG="$HERE/cfg.sh"
 STATE="$HERE/state.sh"
 CONFIG="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
@@ -33,6 +35,8 @@ done
 [ -z "${COORD_HEADLESS:-}" ] || { echo "merge: refusing to merge under COORD_HEADLESS=1 (a human must approve via \`coord approve <id>\`)" >&2; exit 1; }
 
 [ -n "$slice" ] || { echo "merge.sh: --slice is required" >&2; exit 2; }
+progress_context="slice=$slice"
+progress_phase review-and-approval
 
 verdict="$("$STATE" get "$slice" verdict 2>/dev/null || true)"
 head="$("$STATE" get "$slice" head 2>/dev/null || true)"
@@ -48,6 +52,8 @@ if [ "$autonomy" != "auto-merge" ]; then
 fi
 
 cur="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || { echo "merge: cannot read HEAD in $wt" >&2; exit 1; }
+progress_event OK "slice=$slice PASS and approval gate accepted"
+progress_phase verify-reviewed-state
 
 # the review was of the working-tree state, not a commit: recompute the exact
 # reviewed state (diff vs the slice base) and refuse on any drift.
@@ -68,10 +74,14 @@ uname="$(git -C "$repo" config user.name || echo coordinator)"
 
 # the coordinator authors the commit on the slice branch (user's identity only)
 goal="$("$STATE" get "$slice" goal 2>/dev/null || echo "$slice")"
+progress_event OK "slice=$slice reviewed state matches and changes are staged"
+progress_phase commit "slice=$slice branch=$branch"
 if ! git -C "$wt" -c user.email="$uemail" -c user.name="$uname" commit -q -m "[coord] $goal"; then
   echo "merge: commit failed in $wt" >&2; exit 1
 fi
 
+progress_event OK "slice=$slice commit created"
+progress_phase merge "slice=$slice branch=$branch repo=$repo"
 if ! git -c user.email="$uemail" -c user.name="$uname" -C "$repo" merge --no-ff --no-edit "$branch" >/dev/null 2>&1; then
   echo "merge: git merge failed for $branch" >&2
   exit 1
@@ -80,13 +90,19 @@ fi
 sha="$(git -C "$repo" rev-parse HEAD)"
 "$STATE" merged "$slice" "$sha" >/dev/null
 printf 'MERGE %s base=%s sha=%s\n' "$slice" "$base" "$sha"
+progress_event OK "slice=$slice merged locally sha=$sha"
 # push what we actually merged INTO (the checked-out branch), not the base:
 # the merge lands on the current branch, so report and push that ref truthfully
 cur="$(git -C "$repo" branch --show-current 2>/dev/null || true)"
 if [ -n "$cur" ] && git -C "$repo" remote | grep -qx origin; then
+  progress_phase push "slice=$slice destination=origin/$cur"
   if git -C "$repo" push origin "$cur" >/dev/null 2>&1; then
     printf 'PUSH %s -> origin/%s\n' "$cur" "$cur"
   else
+    progress_result=WARN
+    progress_note="merged locally; push failed; run git push origin $cur"
     echo "merge: merged locally, but push to origin/$cur failed (run \`git push origin $cur\` to publish)" >&2
   fi
+else
+  progress_note="merged locally; push skipped because no origin or current branch exists"
 fi

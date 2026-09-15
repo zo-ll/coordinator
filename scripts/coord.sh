@@ -25,6 +25,8 @@ CFG="$HERE/cfg.sh"
 COORD_HOME="${COORD_HOME:-$HOME/.coordinator}"
 ENV_CONF="${COORD_ENV_CONF:-$COORD_HOME/env.conf}"
 source "$HERE/queue.sh"
+source "$HERE/progress.sh"
+progress_start coord
 repo="${COORD_REPO:-$PWD}"
 
 if [ "${1:-}" = "approve" ]; then
@@ -36,6 +38,7 @@ if [ "${1:-}" = "approve" ]; then
   fi
   mkdir -p "$COORD_ROOT/approvals"
   : > "$COORD_ROOT/approvals/$slice"
+  progress_note="approval recorded for slice=$slice; this command does not enqueue a wake; coordinator must run merge.sh --slice $slice"
   printf 'APPROVED %s\n' "$slice"
   exit 0
 fi
@@ -109,6 +112,12 @@ session="$(printf '%s' "$session" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{
 printf '%s\n' "$session" > "$repo/.coordinator/session"
 
 printf 'SESSION %s source=%s harness=%s repo=%s\n' "$session" "$sid_src" "$harness" "$repo"
+progress_context="harness=$harness session=$session source=$sid_src repo=$repo"
+progress_event OK "$progress_context"
+case "$sid_src" in
+  codex-sessions|claude-projects) progress_event WARN "session chosen from newest file; verify session=$session belongs to this run" ;;
+esac
+progress_phase hygiene
 
 # repo hygiene: workers use `git add -A`, so keep finish markers out of the
 # index from the start. Ensure .gitignore ignores .scratch/ and commit it on
@@ -117,7 +126,7 @@ printf 'SESSION %s source=%s harness=%s repo=%s\n' "$session" "$sid_src" "$harne
 gi="$repo/.gitignore"
 if ! grep -qx '.scratch/' "$gi" 2>/dev/null; then
   printf '.scratch/\n' >> "$gi"
-  "$HERE/hygiene-commit.sh" "$repo" .gitignore "[coord] ignore .scratch markers" >/dev/null 2>&1 || true
+  "$HERE/hygiene-commit.sh" "$repo" .gitignore "[coord] ignore .scratch markers" >/dev/null 2>&1 || progress_event WARN "could not commit .gitignore hygiene; inspect repository state"
 fi
 
 # claude repo hygiene: claude grants permissions per process and per allowed
@@ -132,10 +141,11 @@ fi
 if [ ! -e "$cs" ]; then
   mkdir -p "$(dirname "$cs")"
   printf '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  }\n}\n' > "$cs"
-  "$HERE/hygiene-commit.sh" "$repo" ".claude/settings.local.json" "[coord] claude full permissions" >/dev/null 2>&1 || true
+  "$HERE/hygiene-commit.sh" "$repo" ".claude/settings.local.json" "[coord] claude full permissions" >/dev/null 2>&1 || progress_event WARN "could not commit Claude settings hygiene; inspect repository state"
 fi
 
 if [ "$start_relay" = 1 ]; then
+  progress_phase relay-launch
   mkdir -p "$COORD_ROOT"
   # pin the resume recipe so the relay never depends on env.conf `current`,
   # which may be unresolved in the coordinator's shell; config is explicit.
@@ -147,4 +157,7 @@ if [ "$start_relay" = 1 ]; then
   pid="$!"
   printf '%s\n' "$pid" > "$COORD_ROOT/relay.pid"
   printf 'RELAY pid=%s\n' "$pid"
+  progress_note="relay launch requested pid=$pid (readiness not yet verified); run $HERE/status.sh --watch; progress=$COORD_ROOT/progress.log"
+else
+  progress_note="session recorded; relay disabled by --no-relay"
 fi

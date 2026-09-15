@@ -51,7 +51,7 @@ if "$APPLY" --answers 'critic.harness=ghost' >/dev/null 2>&1; then
   echo "  expected unknown harness to fail"; exit 1
 fi
 
-# multi-harness: lane.strong proposed, role/adapters/tracker asked
+# Other installed harnesses do not change the single-harness default.
 cat > "$COORD_ENV_CONF" <<EOF
 current=codex
 installed=codex,claude
@@ -64,10 +64,9 @@ EOF
 rm -f "$COORD_CONFIG"
 out="$("$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
-  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge tracker=local adapters=none"
+  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge tracker=local adapters=none"
 block="$(printf '%s\n' "$out" | tail -n +2)"
-case "$block" in *critic.harness=codex*) ;; *) echo "  ASK missing roles"; exit 1 ;; esac
-case "$block" in *lane.strong.harness=claude*) ;; *) echo "  ASK missing lane.strong"; exit 1 ;; esac
+case "$block" in *critic.harness=*|*lane.strong.*) echo "  unexpected multi-harness setup"; exit 1 ;; esac
 case "$block" in *adapters=none*) ;; *) echo "  ASK missing adapters"; exit 1 ;; esac
 case "$block" in *tracker=local*) ;; *) echo "  ASK missing tracker"; exit 1 ;; esac
 

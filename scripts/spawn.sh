@@ -10,6 +10,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/progress.sh"
+progress_start spawn
 CFG="$HERE/cfg.sh"
 INVOKE="$HERE/invoke.sh"
 STATE="$HERE/state.sh"
@@ -28,6 +30,7 @@ while [ $# -gt 0 ]; do
     *) echo "spawn.sh: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+progress_context="role=${role:-missing} slice=${slice:-none} worktree=${wt:-missing}"
 [ -n "$role" ] && [ -n "$prompt" ] && [ -n "$wt" ] || {
   echo "spawn.sh: --role, --prompt and --worktree are required" >&2
   exit 2
@@ -57,7 +60,7 @@ if [ "$role" = critic ]; then
   # Keep assembly outside the worktree so repeated previews cannot add files
   # to their own changed-file set. invoke.sh supplies the preamble.
   assembly="$(mktemp)"
-  trap 'rm -f "$assembly" "$assembly.finish"' EXIT
+  progress_cleanup() { rm -f "$assembly" "$assembly.finish"; }
   cat "$prompt" > "$assembly"
   printf '\n## Changed files\n%s\n' "$COORD_CHANGES" >> "$assembly"
   if [ -n "$excluded" ]; then printf '\n## Excluded\n%s\n' "$excluded" >> "$assembly"; fi
@@ -97,6 +100,8 @@ fi
 
 h="$("$CFG" get "$CONFIG" "$hkey")" || { echo "spawn.sh: no $hkey in $CONFIG" >&2; exit 1; }
 m="$("$CFG" get "$CONFIG" "$mkey" 2>/dev/null || true)"
+progress_context="role=$role slice=${slice:-none} harness=$h model=${m:-default} worktree=$wt"
+progress_phase assemble
 
 mapfile -d '' -t argv < <("$INVOKE" "$h" "$role" "$prompt" "$wt" "$m")
 [ "${#argv[@]}" -gt 0 ] || {
@@ -106,6 +111,7 @@ mapfile -d '' -t argv < <("$INVOKE" "$h" "$role" "$prompt" "$wt" "$m")
 
 if [ "$role" = critic ]; then argv=(env "COORD_CHANGES=$COORD_CHANGES" "${argv[@]}"); fi
 if [ "$preview" = true ]; then
+  progress_note="preview only; no process launched"
   # One shell-quoted argv line includes the exact prompt and launch env.
   printf '%q ' "${argv[@]}"
   printf '\n'
@@ -115,6 +121,7 @@ fi
 logdir="$COORD_ROOT/log"
 mkdir -p "$logdir"
 log="$logdir/$role${slice:+.$slice}.log"
+progress_note="role log=$log"
 
 launch() {
   local wt="$1" log="$2"
@@ -125,22 +132,33 @@ launch() {
     [ -z "$name" ] && continue
     [ "$name" = "none" ] && continue
     a="$adapters_dir/$name.sh"
-    [ -f "$a" ] || continue
+    if [ ! -f "$a" ]; then
+      progress_event WARN "configured adapter=$name not found at $a; trying the next launcher"
+      continue
+    fi
     # shellcheck source=/dev/null
     . "$a"
+    progress_event START "launch adapter=$name $progress_context"
     if ADAPTER_NAME="$role" adapter_launch "$wt" "$log" "$@"; then return 0; fi
+    progress_event WARN "adapter=$name declined or failed; trying the next launcher"
   done
   # core launcher: background with full fd isolation (stdin closed, stdout+stderr
   # to the log) and the pid written to a file, so the caller's command
   # substitution never waits on the job — a child holding a pipe fd hangs
   # spawn.sh (observed with codex exec).
   local pidfile="$log.pid"
+  progress_event START "launch adapter=none (background process) $progress_context"
   rm -f "$pidfile"
   ( cd "$wt" && setsid "$@" </dev/null >>"$log" 2>&1 & echo $! > "$pidfile" )
   cat "$pidfile"
 }
 
-pid="$(launch "$wt" "$log" "${argv[@]}")"
+event=-
+if [ -n "$slice" ]; then
+  case "$role" in worker) event="$wslug" ;; critic) event="$slice.critic" ;; esac
+fi
+progress_phase launch
+pid="$(launch "$wt" "$log" bash "$HERE/run-role.sh" "$role" "${slice:--}" "$event" "${argv[@]}")"
 
 if [ -n "$slice" ]; then
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
@@ -149,3 +167,4 @@ fi
 
 printf 'SPAWN %s slice=%s pid=%s wt=%s log=%s\n' \
   "$role" "${slice:-none}" "$pid" "$wt" "$log"
+progress_note="pid=$pid launch recorded; work completion is still pending; log=$log"

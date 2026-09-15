@@ -14,8 +14,37 @@ description: >-
 ## Invariant
 
 You route protocol; the critic is the only content reviewer. You never read a
-worker's diff. All state lives in the scripts' files; you read only their
-one-line outputs.
+worker's diff. All state lives in the scripts' files; read their protocol
+outputs and progress diagnostics, and use `status.sh` for the run's health.
+
+Normal operation uses one terminal and one harness for all roles. Multiple
+installed harnesses do not require mixed roles. Simultaneous multi-harness
+sandboxes are compatibility tests, not the normal workflow. tmux and other
+launch adapters are opt-in.
+
+## Make progress visible
+
+Lifecycle scripts emit `[COORD] START`, `OK`, `WAIT`, `WARN`, and `FAIL` to
+stderr and persist them in `$COORD_ROOT/progress.log`. Keep these diagnostics
+visible when calling detect, plan, apply, coord, worktree, spawn, finish, state
+mutations, relay, and merge; do not suppress their stderr.
+
+- Announce the next lifecycle action and slice before calling its script.
+- After it returns, report the actual result and next action in one short line.
+  A launch is not completion; a finish marker is not processed delivery; a
+  successful wake command is not evidence that routing finished.
+- Surface `FAIL` and `WARN` to the user with the phase, slice, and diagnostic.
+  Do not silently skip a failed step or report the affected slice as complete.
+- For `WAIT`, say what is pending: setup answers, worker completion, a critic,
+  corrections, or approval. Include the user's next action when needed.
+- Run `status.sh` after dispatch, at the start of every resumed turn, and before
+  reporting completion. A nonzero status is an alarm to investigate, not a
+  successful run. `LAST-FAIL` is historical and may describe a recovered failure.
+- At boot, tell the user they can run `scripts/status.sh --watch` from another
+  terminal with the same project/root. No launch adapter is required. This is
+  a human viewer; the coordinator should use single snapshots, not own a watch
+  loop. Background diagnostics become visible through this viewer and the
+  coordinator's status checks; they cannot interrupt a stopped session.
 
 ## Boot
 
@@ -35,6 +64,8 @@ one-line outputs.
    detached. If it fails, no fake ids are invented — pass `--session
    <the-harness-real-session-id>` (pi uses `$PI_SESSION_ID`, codex the live
    rollout).
+5. `scripts/status.sh` → check relay liveness and report the runtime root and
+   any warnings. `RELAY pid=…` reports a launch request, not confirmed readiness.
 
 ## Slice lifecycle
 
@@ -76,12 +107,19 @@ make every routing action idempotent.
 Then `state.sh ready`, dispatch each id from `state.sh next`, and when
 `state.sh done` exits 0, report what shipped and stop.
 
+`coord.sh approve <id>` currently records a file without enqueueing a wake.
+After approval, the coordinator must be given a turn to call `merge.sh`; do
+not tell the user approval automatically restarted coordination. Report a
+local merge separately from a successful push.
+
 You implement nothing and review nothing.
 
 ## Observe (do not improvise)
 
-`scripts/status.sh` is the only sanctioned view of a run: relay liveness, queue
-depth, every slice with its pid's liveness, and the tail of each live role log.
+`scripts/status.sh` is the sanctioned snapshot of a run: relay liveness, queue
+depth, every slice with its pid's liveness, role log tails (including dead
+processes), recent progress, and the last historical failure. For live human
+observation, use `scripts/status.sh --watch` in a second terminal.
 When the loop looks stalled, run `status.sh` and act on the protocol — never
 `tail` a role log, `ps` for agents, or read markers by hand. Improvised polling
 is how state diverges from the ledger.

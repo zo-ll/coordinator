@@ -25,6 +25,18 @@ dashboard="${COORD_DASHBOARD:-$PWD/COORDINATION.md}"
 
 cmd="${1:-}"; shift || true
 
+# Read-only queries are often predicates; a false predicate is not a failure.
+case "$cmd" in
+  add|ready|dispatch|review|verdict|merged|blocked|drop|render)
+    source "$(dirname "${BASH_SOURCE[0]}")/progress.sh"
+    progress_start "state.$cmd" "slice=${1:--}"
+    case "$cmd" in
+      verdict) progress_context="slice=${1:--} round=${2:--} verdict=${3:--}" ;;
+      blocked) progress_result=WAIT; progress_note="slice is blocked; coordinator must explain the blocker" ;;
+    esac
+    ;;
+esac
+
 writable() { mkdir -p "$(dirname "$ledger")"; [ -f "$ledger" ] || : > "$ledger"; }
 
 mutate() { # mutate <id> <awk-body> [awk -v assignments...]

@@ -52,14 +52,14 @@ assert "$(printf '%s\n' "$OUT" | grep '^SLICE s2 ')" \
 assert "$(printf '%s\n' "$OUT" | grep '^LOG s1 worker ')" "LOG s1 worker working on it"
 assert "$RC" "0"
 
-# --- dead worker pid: no live log tail, SLICE-STALE, nonzero ----------------
+# --- dead worker pid: preserve the last log for diagnosis, nonzero ----------
 kill "$worker_pid"; wait "$worker_pid" 2>/dev/null || true
 printf '999999\n' > "$COORD_ROOT/relay.pid"
 capture
 assert "$(line 1)" "STATUS relay=999999 alive=0"
 assert "$(printf '%s\n' "$OUT" | grep '^SLICE s1 ')" \
   "SLICE s1 dispatched pid=$worker_pid alive=0 verdict=- goal=first slice"
-if printf '%s\n' "$OUT" | grep -q '^LOG s1 '; then echo "  logged a dead role"; exit 1; fi
+printf '%s\n' "$OUT" | grep -q '^LOG s1 worker working on it' || { echo '  missing dead role log'; exit 1; }
 assert "$(printf '%s\n' "$OUT" | grep '^STALE ')" "STALE none"
 assert "$(printf '%s\n' "$OUT" | grep '^SLICE-STALE s1 age=')" "SLICE-STALE s1 age=0"
 [ "$RC" -ne 0 ] || { echo "  dead slice should exit nonzero"; exit 1; }
@@ -92,21 +92,22 @@ printf '%s\n' "$OUT" | grep -q "^STALE batch=$COORD_ROOT/queue/.inflight/" || {
   echo "  inflight ping not reported stale"; exit 1; }
 [ "$RC" -ne 0 ] || { echo "  stale inflight should exit nonzero"; exit 1; }
 
-# --- fresh pending ping: no false stale, exit 0 -----------------------------
+# --- fresh pending ping: immediately report the missing relay ---------------
 export COORD_ROOT="$TMP/coord-c"
 export COORD_LEDGER="$TMP/repo-c/.coordinator/ledger.tsv"
 export COORD_DASHBOARD="$TMP/repo-c/COORDINATION.md"
 "$QUEUE" enqueue fresh 'DONE fresh: done' >/dev/null
 capture
 assert "$(printf '%s\n' "$OUT" | grep '^STALE ')" "STALE none"
-assert "$RC" "0"
+assert "$RC" "1"
+printf '%s\n' "$OUT" | grep -q '^!!! FAIL relay:'
 
-# --- dead relay + fresh pending: still no false stale -----------------------
+# --- dead relay + fresh pending: fail without waiting for the stale timeout -
 printf '999999\n' > "$COORD_ROOT/relay.pid"
 capture
 assert "$(line 1)" "STATUS relay=999999 alive=0"
 assert "$(printf '%s\n' "$OUT" | grep '^STALE ')" "STALE none"
-assert "$RC" "0"
+assert "$RC" "1"
 
 # --- live pid but stale worktree marker: SLICE-STALE, nonzero ---------------
 export COORD_ROOT="$TMP/coord-d"
@@ -134,5 +135,32 @@ sage="${stale_line##*age=}"
 [ "$sage" -ge 60 ] || { echo "  slice stale age too small: $sage"; exit 1; }
 [ "$RC" -ne 0 ] || { echo "  stale slice should exit nonzero"; exit 1; }
 kill "$worker_pid" 2>/dev/null || true; wait "$worker_pid" 2>/dev/null || true
+
+# A real supervised worker can finish before the next coordinator turn.
+# That is WAIT, not a dead-process alarm. A nonzero exit is still a FAIL.
+export COORD_ROOT="$TMP/coord-e"
+export COORD_LEDGER="$TMP/repo-e/.coordinator/ledger.tsv"
+export COORD_DASHBOARD="$TMP/repo-e/COORDINATION.md"
+export COORD_MARKERS="$TMP/wt-e/.scratch/status"
+mkdir -p "$COORD_ROOT" "$COORD_MARKERS"
+printf '%s\n' "$$" > "$COORD_ROOT/relay.pid"
+: > "$COORD_MARKERS/s1.done"
+bash "$HERE/../scripts/run-role.sh" worker s1 s1 true >"$TMP/role" 2>&1 &
+worker_pid=$!
+"$STATE" add s1 'finished process' >/dev/null
+"$STATE" dispatch s1 "$worker_pid" "$TMP/wt-e" coord/s1 s1 >/dev/null
+wait "$worker_pid"
+capture
+assert "$RC" 0
+printf '%s\n' "$OUT" | grep -q '^WAIT slice=s1 process completed;'
+
+bash "$HERE/../scripts/run-role.sh" worker s1 s1 false >"$TMP/role" 2>&1 &
+worker_pid=$!
+"$STATE" dispatch s1 "$worker_pid" "$TMP/wt-e" coord/s1 s1 >/dev/null
+wait "$worker_pid" && exit 1
+capture
+assert "$RC" 1
+printf '%s\n' "$OUT" | grep -q '^!!! FAIL slice=s1 supervised process failed;'
+worker_pid=""
 
 echo "  status ok"

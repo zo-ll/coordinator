@@ -19,7 +19,7 @@
 set -euo pipefail
 
 # Shared runtime-root initialization; sourcing this file does not run the queue.
-if [ "${COORD_ROOT+x}" != x ]; then
+if [ -z "${COORD_ROOT:-}" ]; then
   repo_slug="$(printf '%s' "${COORD_REPO:-$PWD}" | sed 's/[^[:alnum:]_.-]/-/g; s/^-*//; s/-*$//')"
   printf -v COORD_ROOT '/tmp/%s/%s' coordinator "${repo_slug:-root}"
 fi

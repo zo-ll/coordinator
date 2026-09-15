@@ -9,6 +9,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/progress.sh"
+progress_start detect
 CFG="$HERE/cfg.sh"
 COORD_HOME="${COORD_HOME:-$HOME/.coordinator}"
 ENV_CONF="${COORD_ENV_CONF:-$COORD_HOME/env.conf}"
@@ -99,5 +101,6 @@ for h in "${spawnable[@]:-}"; do
   "$CFG" set "$ENV_CONF" "harness.$h.resume" "$(resume_recipe "$h")"
 done
 
+progress_note="current=${current:-none} installed=$(join_by , "${installed[@]:-}") spawnable=$(join_by , "${spawnable[@]:-}") tmux=$tmux; detection does not prove a real harness turn works"
 printf 'DETECT current=%s installed=%s spawnable=%s tmux=%s gh=%s\n' \
   "${current:-none}" "$(join_by , "${installed[@]:-}")" "$(join_by , "${spawnable[@]:-}")" "$tmux" "$gh"

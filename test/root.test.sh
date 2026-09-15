@@ -53,7 +53,7 @@ assert "$(source "$S/queue.sh"; printf '%s' "$COORD_ROOT")" "$TMP/explicit root/
 "$S/queue.sh" enqueue override 'DONE override: done' >/dev/null
 [ -f "$COORD_ROOT/queue/000000000001.override.ping" ]
 printf '%s\n' "$$" > "$COORD_ROOT/relay.pid"
-assert "$("$S/status.sh" | head -n1)" "STATUS relay=$$ alive=1"
+assert "$("$S/status.sh" | sed -n '1p')" "STATUS relay=$$ alive=1"
 COORD_RESUME=true COORD_SESSION=test "$S/relay.sh" --once
 assert "$("$S/queue.sh" depth)" 'QUEUE pending=0 inflight=0 done=1'
 

@@ -9,6 +9,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/progress.sh"
+progress_start worktree
 CFG="$HERE/cfg.sh"
 CONFIG="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
 repo="${COORD_REPO:-$PWD}"
@@ -29,6 +31,8 @@ done
 [ -n "$base" ] || base="$("$CFG" get "$CONFIG" merge.base 2>/dev/null || echo main)"
 [ -n "$dir" ] || dir="${COORD_WORKTREES:-$repo/.coordinator/worktrees}/$slice-$slug"
 branch="coord/$slice-$slug"
+progress_context="slice=$slice branch=$branch path=$dir base=$base"
+progress_phase create
 
 git -C "$repo" rev-parse --verify --quiet "$base^{commit}" >/dev/null || {
   echo "worktree.sh: base '$base' not found in $repo" >&2; exit 1
