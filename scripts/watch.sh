@@ -1,29 +1,26 @@
 #!/usr/bin/env bash
 # watch.sh <root> [<root> ...]  [--interval N]
-# Live plain-terminal dashboard for detached coordinator runs.
+# Live plain-terminal dashboard: one compact block per harness root.
 #
-# This is the answer to "what is happening?" on ANY harness — especially the
-# headless-turn ones (claude, opencode) whose coordinator reacts invisibly in
-# a resumed session. For each COORD_ROOT it shows, live:
-#   - the status snapshot (relay liveness, queue depth, STALE, slices)
-#   - the coordinator's captured turn log (relay.sh writes headless turns to
-#     $COORD_ROOT/turn.log; older relays fall back to relay.log)
-#   - the newest worker/critic role log tail
+# Per root (newline-squashed so it reads at a glance):
+#   --- <root> ---
+#   STATUS relay=<pid> alive=<0|1>   QUEUE pending=.. inflight=.. done=..
+#   STALE <alarm-or-none>            HEALTH <ok-or-alarm>
+#   slice:state slice:state ...      (ledger, inline)
+#   <last progress line>
 #
-# Ctrl-C stops watching; processes keep running. `scripts/status.sh --watch`
-# is the summary-only variant.
+# Ctrl-C stops watching; workers keep running. `scripts/status.sh --watch`
+# is the verbose snapshot variant; this is the glanceable one.
 set -uo pipefail
 # No set -e: a dashboard loop must survive transient glitches (empty logs,
-# SIGPIPE from early-close heads). Failures below are guarded individually.
+# SIGPIPE from early-close heads). Fragile pipelines are guarded individually.
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 interval=3
-tail_n=6
 roots=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --interval) interval="$2"; shift 2 ;;
-    --tail)     tail_n="$2";  shift 2 ;;
     -*) echo "watch.sh: unknown arg: $1" >&2; exit 2 ;;
     *) roots+=("$1"); shift ;;
   esac
@@ -36,21 +33,20 @@ done
 
 while :; do
   clear
-  printf '%s — coordinator dashboard (Ctrl-C stops watching; workers keep running)\n' "$(date '+%H:%M:%S')"
+  printf '%s — coordinator status (Ctrl-C stops watching; workers keep running)\n' "$(date '+%H:%M:%S')"
   for root in "${roots[@]}"; do
-    [ -d "$root" ] || { echo "── $root ──  (missing)"; continue; }
-    echo "── $root ──"
-    env COORD_ROOT="$root" "$HERE/status.sh" 2>/dev/null | head -8 || true
-    turn="$root/turn.log"; [ -f "$turn" ] || turn="$root/relay.log"
-    if [ -f "$turn" ]; then
-      echo "  coordinator voice:"
-      tail -n "$tail_n" "$turn" | grep -v '^$' | tail -n "$tail_n" | sed 's/^/    /' || true
+    [ -d "$root" ] || { echo "--- $root (missing)"; continue; }
+    echo "--- $root ---"
+    env COORD_ROOT="$root" "$HERE/status.sh" 2>/dev/null \
+      | grep -E 'STATUS|QUEUE|STALE|HEALTH' | head -4 || true
+    ledger="$(dirname "$root")/tinyproj/.coordinator/ledger.tsv"
+    [ -f "$ledger" ] || ledger="$(dirname "$root")/ledger.tsv"        # internal-root layout (opencode)
+    [ -f "$ledger" ] || ledger="$(dirname "$(dirname "$root")")/tinyproj/.coordinator/ledger.tsv"
+    if [ -f "$ledger" ]; then
+      awk -F'\t' '{printf "  %s:%s ", $1, $2}' "$ledger" 2>/dev/null || true
+      echo
     fi
-    newest="$(ls -t "$root"/log/worker.*.log "$root"/log/critic.*.log 2>/dev/null | head -1 || true)"
-    if [ -n "$newest" ]; then
-      echo "  $(basename "$newest"):"
-      tail -n 3 "$newest" | grep -v '^\[COORD\]' | sed 's/^/    /' || true
-    fi
+    tail -1 "$root/progress.log" 2>/dev/null | tr -d '\0' | cut -c1-110 || true
   done
   sleep "$interval"
 done
