@@ -94,11 +94,11 @@ resumed turn, read the batch file and route each `EVENT`:
 - `VERDICT <task>: handback` → write a correction brief; respawn the SAME
   worker with a new round slug.
 
-Correlate `DONE <slug>` / `VERDICT <slug>` to the slice whose id is the slug's
-task prefix (before the first `.`). Resolve the task to a slice id in this
-order: (1) exact ledger id; (2) if the task ends in `-<suffix>`, retry with the
-trailing `-…` segment stripped (a worker may carry the worktree suffix);
-(3) otherwise it is a protocol error — surface it, do not guess.
+Correlate `DONE <task>` / `VERDICT <task>` to a slice id **mechanically**:
+run `state.sh resolve "$task"` — exact ledger id; else a trailing `-<suffix>`
+(codex worktree decoration) or `.<round>` stripped; else it exits 1 listing
+the rejected candidates. Routing is never a head-held guess; a nonzero
+resolve is a protocol error to surface, never to paper over.
 
 Delivery is at-least-once: after a relay crash an event may be redelivered.
 Never re-spawn a critic for a slice already `reviewing` (check `state.sh`), and
@@ -119,7 +119,11 @@ You implement nothing and review nothing.
 `scripts/status.sh` is the sanctioned snapshot of a run: relay liveness, queue
 depth, every slice with its pid's liveness, role log tails (including dead
 processes), recent progress, and the last historical failure. For live human
-observation, use `scripts/status.sh --watch` in a second terminal.
+observation, use `scripts/status.sh --watch` in a second terminal. For the
+coordinator's own voice on headless-turn harnesses (claude/opencode — their
+resumed turns produce no visible TUI output), run `scripts/watch.sh <root>…`
+in a second terminal: it tails the turns `relay.sh` captures into
+`$COORD_ROOT/turn.log`, so progress reads as progress.
 When the loop looks stalled, run `status.sh` and act on the protocol — never
 `tail` a role log, `ps` for agents, or read markers by hand. Improvised polling
 is how state diverges from the ledger.

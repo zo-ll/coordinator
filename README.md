@@ -27,6 +27,18 @@ override if you set one:
 /path/to/coordinator/scripts/status.sh --watch
 ```
 
+For the full picture — including the headless coordinator's own narration
+(claude/opencode turns run invisibly in a resumed session; `relay.sh` captures
+them into `$COORD_ROOT/turn.log`) — give the dashboard one or more roots:
+
+```sh
+/path/to/coordinator/scripts/watch.sh /tmp/sandbox/claude/root /tmp/sandbox/opencode/tinyproj/.coordinator/root
+```
+
+`watch.sh` redraws every 3s (or `--interval 1`): status snapshot, the
+coordinator's latest turn text, and the newest worker/critic log tail, per
+root. Ctrl-C stops the viewer; it does not stop the run.
+
 Snapshots update when something changes (checked every two seconds).
 `--watch --interval 1` checks every second. Ctrl-C stops the viewer; it does
 not stop the run. `status.sh` without arguments prints one snapshot and exits

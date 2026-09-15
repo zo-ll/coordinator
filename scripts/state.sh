@@ -11,6 +11,9 @@
 #   state.sh verdict <id> <round> <pass|handback> <head>
 #   state.sh merged <id> <sha>
 #   state.sh blocked <id>
+#   state.sh resolve <task>                    -> the slice id, or exit 1
+#       (exact ledger id; else trailing -<suffix> stripped; else an error
+#        listing the rejected candidates — never a guess)
 #   state.sh drop <id>
 #   state.sh list                       -> "id <TAB> status <TAB> pid <TAB> verdict <TAB> goal"
 #   state.sh done                       -> exit 0 iff every slice is merged|dropped
@@ -162,6 +165,23 @@ case "$cmd" in
     printf 'DROPPED %s\n' "$id"
     ;;
 
+  resolve)
+    # task -> slice id, mechanically; the coordinator never guesses.
+    # Decorations: a trailing `-<suffix>` (codex worktree suffix, issue #18)
+    # or a trailing `.<round>` (round-2 slugs) both reduce to the base id.
+    task="${1:?task}"
+    [ -f "$ledger" ] || { echo "resolve: no ledger at $ledger" >&2; exit 1; }
+    ledger_has() { awk -F'\t' -v id="$1" '$1==id { f=1 } END { exit(f ? 0 : 1) }' "$ledger"; }
+    if ledger_has "$task"; then printf '%s\n' "$task"; exit 0; fi
+    for cand in "${task%-*}" "${task%%.*}"; do
+      [ -n "$cand" ] && [ "$cand" != "$task" ] && ledger_has "$cand" && { printf '%s\n' "$cand"; exit 0; }
+    done
+    # neither an id nor an id-plus-decoration is a protocol error: surface the
+    # rejected candidates, never resolve to a guess
+    echo "resolve: no ledger id for '$task' (rejected: exact id; '-<suffix>' base '${task%-*}'; '.<round>' base '${task%%.*}')" >&2
+    exit 1
+    ;;
+
   list)
     [ -f "$ledger" ] || exit 0
     awk -F'\t' -v OFS='\t' '{ print $1, $2, $8, $10, $12 }' "$ledger"
@@ -185,7 +205,7 @@ case "$cmd" in
     ;;
 
   *)
-    echo "usage: state.sh add|ready|next|get|dispatch|review|verdict|merged|blocked|drop|list|done|render" >&2
+    echo "usage: state.sh add|ready|next|get|dispatch|review|verdict|merged|blocked|drop|resolve|list|done|render" >&2
     exit 2
     ;;
 esac

@@ -63,6 +63,11 @@ assert "$(grep -c '^EVENT ' "$batch")" "20"
 assert "$("$QUEUE" list | wc -l)" "0"
 assert "$(ls "$COORD_ROOT/queue/.done" | wc -l)" "20"
 
+# the headless coordinator's narration is captured for the dashboard:
+# relay.sh writes the wake marker + wake command output to turn.log
+assert "$(grep -c '^=== turn ' "$COORD_ROOT/turn.log")" "1"
+assert "$(grep -c 'WAKE batch=' "$COORD_ROOT/turn.log")" "1"
+
 # --- permanent failure: bounded retries, loud give-up, events kept in .inflight
 cat > "$TMP/fail-resume" <<'EOF'
 #!/usr/bin/env bash

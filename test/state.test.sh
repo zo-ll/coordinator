@@ -53,4 +53,21 @@ grep -q '| s1 | merged |' "$COORD_DASHBOARD" || { echo "  render missing s1"; ex
 # one line per slice
 assert "$("$STATE" list | wc -l)" "3"
 
+# resolve: exact id, codex-style suffixed task, malformed task (issue #18)
+assert "$("$STATE" resolve s1)" "s1"
+assert "$("$STATE" resolve s1-s1)" "s1"
+assert "$("$STATE" resolve s2-suffix)" "s2"
+if out=$("$STATE" resolve nope 2>&1); then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then echo "  resolve accepted unknown task" >&2; exit 1; fi
+assert "$rc" "1"
+assert "$(echo "$out" | wc -l)" "1"
+echo "$out" | grep -q 'no ledger id for' || { echo "  resolve error not one-line+clear" >&2; echo "$out" >&2; exit 1; }
+
+# resolve is also the routing path for round-2 slugs: docs.r2 -> docs
+export COORD_LEDGER="$TMP/repo2/.coordinator/ledger.tsv"
+"$STATE" add docs "doc slice" >/dev/null
+assert "$("$STATE" resolve docs)" "docs"
+assert "$("$STATE" resolve docs.r2)" "docs"
+
+
 echo "  state ok"

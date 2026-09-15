@@ -103,7 +103,16 @@ resume() { # pointer
     argv[$i]="${argv[$i]//__SESSION__/$session}"
     argv[$i]="${argv[$i]//__SERVER__/$server}"
   done
-  "${argv[@]}"
+  # Capture the wake command's output: for headless-turn harnesses (claude,
+  # opencode) this is the coordinator's visible narration. Without it the user
+  # sees an idle TUI; with it, status/watch can tail the coordinator's voice.
+  # The resume exit code still gates retry/ack.
+  local log="$COORD_ROOT/turn.log" rc=0
+  {
+    printf '\n=== turn %s batch=%s ===\n%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(basename "$pointer")" "$wake"
+    "${argv[@]}"
+  } >> "$log" 2>&1 || rc=$?
+  return "$rc"
 }
 
 mkdir -p "$COORD_ROOT" "$COORD_ROOT/batch"
