@@ -23,8 +23,8 @@ role=""; prompt=""; wt=""; slice=""; preview=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --role)     role="$2";   shift 2 ;;
-    --prompt)   prompt="$2"; shift 2 ;;
-    --worktree) wt="$2";     shift 2 ;;
+    --prompt)   prompt="$(realpath -m "$2")"; shift 2 ;;
+    --worktree) wt="$(realpath -m "$2")"; shift 2 ;;
     --slice)    slice="$2";  shift 2 ;;
     --preview)  preview=true; shift ;;
     *) echo "spawn.sh: unknown arg: $1" >&2; exit 2 ;;
