@@ -116,8 +116,9 @@ for h in $HARNESSES; do
   done
   OC_SERVER=""
   OC_XDG=""
+  OC_CODEX_HOME=""
   case "$h" in
-    codex)   ln -s "$(command -v codex)"    "$BIN/codex";   ln -s "$(command -v node)" "$BIN/node"; LAUNCH="codex -c model=\"$CODEX_MODEL\""; MODEL="$CODEX_MODEL" ;;
+    codex)   ln -s "$(command -v codex)"    "$BIN/codex";   ln -s "$(command -v node)" "$BIN/node"; LAUNCH="codex -c model=\"$CODEX_MODEL\""; MODEL="$CODEX_MODEL"; OC_CODEX_HOME="$HOME/.codex" ;;
     claude)  ln -s "$(command -v claude)"   "$BIN/claude";  LAUNCH="claude --model $CLAUDE_MODEL"; MODEL="$CLAUDE_MODEL" ;;
     opencode) ln -s "$(command -v opencode)" "$BIN/opencode"; LAUNCH="opencode --auto --port 45111"; OC_SERVER="http://127.0.0.1:45111"; OC_XDG="$D/xdgconfig"; MODEL=""
       # sandbox-local config: attach-woken/headless turns need permission rules
@@ -157,6 +158,7 @@ OC
 export PATH="$BIN"
 export COORD_OPENCODE_SERVER="$OC_SERVER"
 export XDG_CONFIG_HOME="$OC_XDG"
+export CODEX_HOME="$OC_CODEX_HOME"
 PIN
   cp "$D/home/envpin" "$D/home/.bashrc"
   cp "$D/home/envpin" "$D/home/.profile"
