@@ -20,11 +20,14 @@ COORD_ROOT="${COORD_ROOT:-/tmp/coordinator}"
 adapters_dir="${COORD_ADAPTERS:-$HERE/../adapters}"
 
 role=""; prompt=""; wt=""; slice=""; preview=false
+# Coordinator paths are relative to the coordinator repo (tinyproj), but the
+# caller may spawn from a different cwd (codex does) — root them at COORD_REPO.
+abs_path() { case "$1" in /*) realpath -m "$1" ;; *) realpath -m "${COORD_REPO:-$PWD}/$1" ;; esac; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --role)     role="$2";   shift 2 ;;
-    --prompt)   prompt="$(realpath -m "$2")"; shift 2 ;;
-    --worktree) wt="$(realpath -m "$2")"; shift 2 ;;
+    --role)     role="$2";            shift 2 ;;
+    --prompt)   prompt="$(abs_path "$2")"; shift 2 ;;
+    --worktree) wt="$(abs_path "$2")";     shift 2 ;;
     --slice)    slice="$2";  shift 2 ;;
     --preview)  preview=true; shift ;;
     *) echo "spawn.sh: unknown arg: $1" >&2; exit 2 ;;
