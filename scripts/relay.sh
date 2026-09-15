@@ -23,6 +23,8 @@
 # not be able to answer its own "should I merge?"): it tells the coordinator
 # to surface any pending merge decision for the human and end the turn.
 # Approval is recorded only by a human running `coord.sh approve <id>`.
+# Exception: when config autonomy=auto-merge (unattended/test runs) the wake
+# tells the coordinator to merge directly instead — no approval round-trip.
 #
 # Exactly one relay per COORD_ROOT: a non-blocking flock guards the loop, and a
 # fresh relay.pid is written (self-cleaned on exit) so a stale pid cannot point
@@ -117,10 +119,18 @@ trap 'rm -f "$COORD_ROOT/relay.pid"' EXIT
 "$QUEUE" nack
 
 deliver() { # batch: retry resume with backoff, ack on success, give up loudly
-  local batch="$1" attempt=0 wait="$backoff"
+  local batch="$1" attempt=0 wait="$backoff" autonomy wake
+  autonomy="$(cfg_get "${COORD_CONFIG:-$PWD/.coordinator/config.conf}" autonomy 2>/dev/null || true)"
+  if [ "$autonomy" = "auto-merge" ]; then
+    # test/unattended runs: merges are pre-authorized by config, so never tell
+    # the coordinator to stop and ask
+    wake="WAKE batch=$batch — route each event and merge passed slices directly: this run is configured autonomy=auto-merge, so no human approval is required."
+  else
+    wake="WAKE batch=$batch — route each event; if a merge decision is due, do not decide it yourself: surface it for the human and end the turn. Approval can only come from a human running 'coord.sh approve <id>' in their own terminal — never from inside this turn."
+  fi
   while :; do
     attempt=$(( attempt + 1 ))
-    if resume "WAKE batch=$batch — route each event; if a merge decision is due, do not decide it yourself: surface it for the human and end the turn. Approval can only come from a human running 'coord.sh approve <id>' in their own terminal — never from inside this turn."; then
+    if resume "$wake"; then
       "$QUEUE" ack
       return 0
     fi
