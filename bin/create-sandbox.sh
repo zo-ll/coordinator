@@ -117,10 +117,11 @@ for h in $HARNESSES; do
   OC_SERVER=""
   OC_XDG=""
   OC_CODEX_HOME=""
+  CR="$D/root"
   case "$h" in
-    codex)   ln -s "$(command -v codex)"    "$BIN/codex";   ln -s "$(command -v node)" "$BIN/node"; LAUNCH="codex -c model=\"$CODEX_MODEL\""; MODEL="$CODEX_MODEL"; OC_CODEX_HOME="$HOME/.codex" ;;
+    codex)   ln -s "$(command -v codex)"    "$BIN/codex";   ln -s "$(command -v node)" "$BIN/node"; LAUNCH="codex -s danger-full-access -c model=\"$CODEX_MODEL\""; MODEL="$CODEX_MODEL"; OC_CODEX_HOME="$HOME/.codex" ;;
     claude)  ln -s "$(command -v claude)"   "$BIN/claude";  LAUNCH="claude --model $CLAUDE_MODEL"; MODEL="$CLAUDE_MODEL" ;;
-    opencode) ln -s "$(command -v opencode)" "$BIN/opencode"; LAUNCH="opencode --auto --port 45111"; OC_SERVER="http://127.0.0.1:45111"; OC_XDG="$D/xdgconfig"; MODEL=""
+    opencode) ln -s "$(command -v opencode)" "$BIN/opencode"; LAUNCH="opencode --auto --port 45111"; OC_SERVER="http://127.0.0.1:45111"; OC_XDG="$D/xdgconfig"; CR="$D/tinyproj/.coordinator/root"; MODEL=""
       # sandbox-local config: attach-woken/headless turns need permission rules
       # (project opencode.json is not used by 'opencode run'), without touching
       # the user's global config
@@ -184,6 +185,7 @@ PIN
     echo "tiny project" > README.md &&
     mkdir -p .claude &&
     printf '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  }\n}\n' > .claude/settings.local.json &&
+    printf '.scratch/\n.coordinator/root/\n' > .gitignore &&
     printf '{\n  "$schema": "https://opencode.ai/config.json",\n  "permission": {\n    "tools": {\n      "read": "allow",\n      "write": "allow",\n      "edit": "allow",\n      "bash": "allow",\n      "glob": "allow",\n      "grep": "allow",\n      "list": "allow"\n    }\n  }\n}\n' > opencode.json &&
     git add -A && git add -f .claude/settings.local.json && git commit -q -m init &&
     git branch -m main )
@@ -214,7 +216,7 @@ CFG
   # stable index for sending/poking)
   tmux kill-window -t "coord-$h" 2>/dev/null || true
   widx="$(tmux new-window -d -P -F '#{window_index}' -n "coord-$h" -c "$D/tinyproj" \
-    "bash --noprofile --norc -c 'printf \"SANDBOX ($h): no tmux, single harness — prompt will be auto-sent\\\\n\\\\n\"; env HOME=$D/home BASH_ENV=$D/home/envpin PATH=$BIN COORD_HOME=$D/home COORD_ROOT=$D/root COORD_OPENCODE_SERVER=$OC_SERVER CODEX_HOME=$OC_CODEX_HOME $LAUNCH'")"
+    "bash --noprofile --norc -c 'printf \"SANDBOX ($h): no tmux, single harness — prompt will be auto-sent\\\\n\\\\n\"; env HOME=$D/home BASH_ENV=$D/home/envpin PATH=$BIN COORD_HOME=$D/home COORD_ROOT=$CR COORD_OPENCODE_SERVER=$OC_SERVER CODEX_HOME=$OC_CODEX_HOME $LAUNCH'")"
   echo "$widx" > "$RES/$h.window"
 
   # separate watcher registering results
@@ -252,14 +254,19 @@ wait_for() { # <win> <pattern> <tries>
   for i in $(seq 1 "$n"); do pane_has "$w" "$pat" && return 0; sleep 1; done
   return 1
 }
-submit_prompt() { # <harness> <win> <text>; verifies the text left the input
-  local h="$1" w="$2" text="$3" i probe
-  probe="$(printf '%s' "$text" | cut -c1-40)"
+submit_prompt() { # <harness> <win> <text>; type once, then only Enter on retry
+  local h="$1" w="$2" text="$3" i
+  # Type the text exactly once. Retries must never retype it: the submitted
+  # message is echoed into the transcript, so a pane-wide text probe always
+  # matches and the old loop pasted the prompt three times (observed in
+  # codex/claude). Pressing Enter again on an empty input is harmless.
+  tmux send-keys -t "$w" -- "$text"
+  sleep 2
   for i in 1 2 3; do
-    tmux send-keys -t "$w" -- "$text" Enter
-    sleep 3
-    pane_has "$w" "$(printf '%s' "$probe" | sed 's/[][\.*^$(){}?+|/]/\\&/g')" || return 0
-    sleep 2
+    tmux send-keys -t "$w" Enter
+    sleep 4
+    # a turn is running: an interrupt affordance is showing
+    pane_has "$w" 'esc to interrupt|Working|Thinking' && { sleep 1; return 0; }
   done
   echo "  WARN: coord-$h prompt may still be sitting in its input"
   return 0
@@ -300,11 +307,12 @@ if [ "$SEND" = 1 ]; then
     boot_harness "$h" "$widx" || echo "  WARN: coord-$h did not look ready"
     submit_prompt "$h" "$widx" "$PROMPT"
     if [ "$h" = claude ]; then
-      # a lingering suggestion menu also eats the submit; dismiss and resend
+      # a lingering suggestion menu also eats the submit; dismiss and resend once
       sleep 4
-      if pane_has "$widx" 'Type something|Chat about this'; then
+      if pane_has "$widx" 'Type something|Chat about this' && ! pane_has "$widx" 'esc to interrupt'; then
         tmux send-keys -t "$widx" Escape; sleep 1
-        submit_prompt claude "$widx" "$PROMPT"
+        tmux send-keys -t "$widx" -- "$PROMPT"; sleep 2
+        tmux send-keys -t "$widx" Enter
       fi
     fi
     echo "sent prompt to coord-$h (window $widx)"
