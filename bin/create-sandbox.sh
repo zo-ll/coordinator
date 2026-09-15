@@ -214,7 +214,7 @@ CFG
   # stable index for sending/poking)
   tmux kill-window -t "coord-$h" 2>/dev/null || true
   widx="$(tmux new-window -d -P -F '#{window_index}' -n "coord-$h" -c "$D/tinyproj" \
-    "bash --noprofile --norc -c 'printf \"SANDBOX ($h): no tmux, single harness — prompt will be auto-sent\\\\n\\\\n\"; env HOME=$D/home BASH_ENV=$D/home/envpin PATH=$BIN COORD_HOME=$D/home COORD_ROOT=$D/root COORD_OPENCODE_SERVER=$OC_SERVER $LAUNCH'")"
+    "bash --noprofile --norc -c 'printf \"SANDBOX ($h): no tmux, single harness — prompt will be auto-sent\\\\n\\\\n\"; env HOME=$D/home BASH_ENV=$D/home/envpin PATH=$BIN COORD_HOME=$D/home COORD_ROOT=$D/root COORD_OPENCODE_SERVER=$OC_SERVER CODEX_HOME=$OC_CODEX_HOME $LAUNCH'")"
   echo "$widx" > "$RES/$h.window"
 
   # separate watcher registering results
