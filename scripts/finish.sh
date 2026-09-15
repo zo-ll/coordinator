@@ -88,7 +88,10 @@ else
 fi
 progress_event OK "completion marker written: $markers/$event.done"
 progress_phase enqueue
-enqueued="$("$HERE/queue.sh" enqueue "$event" "$line")"
+# De-dup key: a repeated completion of THIS event at THIS round and head is a
+# true duplicate; a new round or a changed head must still wake the coordinator.
+dedup_key="$event.r${round:--}.$(printf '%s' "${head:--}" | cut -c1-12)"
+enqueued="$("$HERE/queue.sh" enqueue "$event" "$line" "$dedup_key")"
 progress_note="$enqueued; completion published, coordinator processing is separate"
 case "$enqueued" in DUP\ *) progress_event WARN "duplicate event=$event suppressed; no new coordinator notification" ;; esac
 

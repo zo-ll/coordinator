@@ -53,6 +53,23 @@ assert "$("$Q" enqueue dupme 'DONE dupme: done')" "DUP dupme"
 "$Q" pop-batch "$TMP/batch2" >/dev/null
 "$Q" ack
 assert "$("$Q" depth)" "QUEUE pending=0 inflight=0 done=24"
+
+# explicit de-dup key: same event slug stays quiet only for the same key,
+# so a new round or changed head still notifies the coordinator
+assert "$("$Q" enqueue e 'DONE e: done — r1 a' 'e.r1.aaaa')" "ENQUEUED e 000000000025.e.ping"
+assert "$("$Q" enqueue e 'DONE e: done — r1 b' 'e.r1.aaaa')" "DUP e"
+assert "$("$Q" enqueue e 'DONE e: done — r1 c' 'e.r1.bbbb')" "ENQUEUED e 000000000026.e.ping"
+assert "$("$Q" enqueue e 'DONE e: done — r2 a' 'e.r2.aaaa')" "ENQUEUED e 000000000027.e.ping"
+assert "$("$Q" list | wc -l)" "3"
+"$Q" pop-batch "$TMP/batch3" >/dev/null
+"$Q" ack
+assert "$("$Q" depth)" "QUEUE pending=0 inflight=0 done=27"
+
 if "$Q" pending; then echo "  queue should be empty"; exit 1; fi
+
+# a third argument is optional: no key means de-dup on the slug, as before
+export COORD_ROOT="$TMP/coord-default"
+assert "$("$Q" enqueue k 'DONE k: done')" "ENQUEUED k 000000000001.k.ping"
+assert "$("$Q" enqueue k 'DONE k: done again')" "DUP k"
 
 echo "  queue ok"

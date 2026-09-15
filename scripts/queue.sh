@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Ping queue: ordered, de-duplicated, single-consumer.
 #
-#   queue.sh enqueue <slug> <line>     -> ENQUEUED <slug> <file> | DUP <slug>
+#   queue.sh enqueue <slug> <line> [key] -> ENQUEUED <slug> <file> | DUP <slug>
+#     <key> defaults to <slug>; pass it to de-dup on more than the event name
+#     (e.g. event+round+head) so a genuinely new completion still notifies.
 #   queue.sh list                      -> one "<seq> <slug> <file>" line per pending event, in order
 #   queue.sh pending                   -> exit 0 if any pending, else 1
 #   queue.sh depth                     -> QUEUE pending=<n> inflight=<n> done=<n>
@@ -13,7 +15,7 @@
 #   *.ping            pending events, named <seq>.<slug>.ping (seq sorts in arrival order)
 #   .inflight/        events claimed by the consumer, awaiting ack
 #   .done/            acknowledged events
-#   .seen/<slug>      de-dup marker, created at enqueue
+#   .seen/<key>      de-dup marker, created at enqueue
 #   .seq, .seq.lock   sequence counter; the enqueue check/alloc/publish/seen
 #                     runs as ONE atomic transaction under this lock
 set -euo pipefail
@@ -39,13 +41,18 @@ case "$cmd" in
   enqueue)
     slug="${1:?slug}"
     line="${2:?line}"
+    # De-dup on an explicit key when given (event + round + head), so a truly
+    # repeated completion stays quiet while a NEW review round or a changed
+    # head still notifies the coordinator. Keying on the event slug alone
+    # silently swallowed legitimate re-reviews and left slices stalled.
+    key="${3:-$slug}"
     # the whole transaction — de-dup check, sequence allocation, publish,
     # seen marker — runs under a single lock, so a concurrent retry of the
     # same slug cannot double-publish, and publication order equals sequence
     # order (a crash before publish leaves a sequence gap, never a reorder).
     exec 9>"$Q/.seq.lock"
     flock 9
-    if [ -e "$SEEN/$slug" ]; then
+    if [ -e "$SEEN/$key" ]; then
       flock -u 9
       printf 'DUP %s\n' "$slug"
       exit 0
@@ -56,7 +63,7 @@ case "$cmd" in
     tmp="$Q/.tmp.$$.$RANDOM"
     printf '%s\n' "$line" > "$tmp"
     mv -T -- "$tmp" "$Q/$f"
-    : > "$SEEN/$slug"
+    : > "$SEEN/$key"
     flock -u 9
     printf 'ENQUEUED %s %s\n' "$slug" "$f"
     ;;
