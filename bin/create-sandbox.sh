@@ -124,15 +124,24 @@ for h in $HARNESSES; do
       # (project opencode.json is not used by 'opencode run'), without touching
       # the user's global config
       mkdir -p "$OC_XDG/opencode"
-      cat > "$OC_XDG/opencode/opencode.json" <<OC
+      cat > "$OC_XDG/opencode/opencode.json" <<'OC'
 {
   "$schema": "https://opencode.ai/config.json",
   "instructions": [
     "~/.agents/skills/caveman/SKILL.md",
     "~/.agents/skills/coordinator/SKILL.md"
   ],
-  "permission": { "tools": { "read": "allow", "write": "allow", "edit": "allow", \
-    "bash": "allow", "glob": "allow", "grep": "allow", "list": "allow" } }
+  "permission": {
+    "tools": {
+      "read": "allow",
+      "write": "allow",
+      "edit": "allow",
+      "bash": "allow",
+      "glob": "allow",
+      "grep": "allow",
+      "list": "allow"
+    }
+  }
 }
 OC
       ;;
@@ -158,9 +167,11 @@ PIN
   # agent's self-update rewrite the REAL home (observed: claude repointed
   # ~/.local/bin/claude at the sandbox on 2025-09-15). Only the paths the
   # harnesses genuinely need are shared; everything else stays sandbox-local.
-  mkdir -p "$D/home/.local/share" "$D/home/.config"
-  for c in .local/share/opencode .config/opencode .config/git; do
-    [ -e "$HOME/$c" ] && ln -sfn "$HOME/$c" "$D/home/$c" 2>/dev/null || true
+  mkdir -p "$D/home/.local/share" "$D/home/.local/state" "$D/home/.cache" "$D/home/.config"
+  for c in .local/share/opencode .local/state/opencode .cache/opencode .config/opencode .config/git; do
+    [ -e "$HOME/$c" ] || continue
+    rm -rf "$D/home/$c"                      # replace, never nest inside a stale dir
+    ln -sfn "$HOME/$c" "$D/home/$c" 2>/dev/null || true
   done
 
   # isolated repo with the protocol hook
