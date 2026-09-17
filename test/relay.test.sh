@@ -41,25 +41,22 @@ case "$server_line" in
 esac
 export COORD_ROOT="$TMP/coord"
 
-# --- lean brief wake + coalescing: related events route as ONE wake session ---
-export BRIEF_COUNT="$TMP/brief-count"
-cat > "$TMP/brief-resume" <<'EOF'
-#!/usr/bin/env bash
-n=$(cat "$BRIEF_COUNT" 2>/dev/null || echo 0); echo $((n + 1)) > "$BRIEF_COUNT"
-printf '%s\n' "$*" >> "$RELAY_LOG"
-EOF
-chmod +x "$TMP/brief-resume"
+# --- coalescing: related events route as ONE wake ---
 export COORD_ROOT="$TMP/root4"
 mkdir -p "$TMP/tinyproj/.coordinator"
-printf 'a\tdispatched\t-\ta\t1\t\t\t\t\t\t\t\n' > "$TMP/tinyproj/.coordinator/ledger.tsv"
 "$QUEUE" enqueue lean2 'DONE b: done' >/dev/null
 "$QUEUE" enqueue lean1 'DONE a: done — one' >/dev/null
-: > "$RELAY_LOG"; rm -f "$BRIEF_COUNT"
-COORD_RESUME="$TMP/brief-resume|__BATCH__" RELAY_BRIEF=1 "$RELAY" --once --interval 0.2
-assert "$(grep -c 'EVENT lean' "$RELAY_LOG")" "2"
-grep -q 'COORDINATOR WAKE' "$RELAY_LOG" || { echo "  no brief header in wake"; exit 1; }
-grep -q 'state.sh resolve' "$RELAY_LOG" || { echo "  routing rules missing from brief"; exit 1; }
-assert "$(grep -c 'COORDINATOR WAKE' "$RELAY_LOG")" "1"
+: > "$RELAY_LOG"
+cat > "$TMP/coalesce-resume" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$RELAY_LOG"
+EOF
+chmod +x "$TMP/coalesce-resume"
+COORD_RESUME="$TMP/coalesce-resume|__BATCH__" "$RELAY" --once --interval 0.2
+assert "$(wc -l < "$RELAY_LOG" | tr -d ' ')" "1"
+coalesced_batch="$(ls -t "$COORD_ROOT/batch"/*.txt 2>/dev/null | head -1)"
+[ -n "$coalesced_batch" ] || { echo "  no batch file produced"; exit 1; }
+assert "$(grep -c '^EVENT ' "$coalesced_batch")" "2"
 export COORD_ROOT="$TMP/coord"
 
 # a wave already queued before the relay starts -> exactly one batch

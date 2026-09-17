@@ -7,6 +7,10 @@
 # Loop: wait for the queue to be non-empty; claim every pending event, in order,
 # into one batch file; resume the coordinator with a one-line pointer to it; wait
 # for the turn to exit; ack the batch. One turn at a time.
+# Coalescing is always on: for RELAY_DRAIN seconds it keeps absorbing events
+# that land into the same batch (related completions cluster — e.g. critics
+# spawned together finish together), so one coordinator turn routes N events
+# (fewer turns = less transcript re-read = the universal cost lever).
 #
 # Delivery is bounded: a failed resume is retried with exponential backoff up to
 # --max-attempts. On exhaustion the batch is returned to the queue and the relay
@@ -50,9 +54,7 @@ once=0
 interval="${RELAY_INTERVAL:-1}"
 max_attempts="${RELAY_MAX_ATTEMPTS:-5}"
 backoff="${RELAY_BACKOFF:-2}"
-drain="${RELAY_DRAIN:-0}"
-brief=0
-[ "${RELAY_BRIEF:-}" = 1 ] && brief=1
+drain="${RELAY_DRAIN:-10}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --once)         once=1; shift ;;
@@ -60,7 +62,6 @@ while [ $# -gt 0 ]; do
     --max-attempts) max_attempts="$2"; shift 2 ;;
     --backoff)      backoff="$2"; shift 2 ;;
     --drain)        drain="$2"; shift 2 ;;
-    --brief)        brief=1; shift ;;
     *) echo "relay.sh: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -113,7 +114,6 @@ resume() { # pointer
     argv[$i]="${argv[$i]//__SESSION__/$session}"
     argv[$i]="${argv[$i]//__SERVER__/$server}"
     argv[$i]="${argv[$i]//__REPO__/$repo}"
-    argv[$i]="${argv[$i]//__WAKE__/$pointer}"
   done
   # Capture the wake command's output: for headless-turn harnesses (claude,
   # opencode) this is the coordinator's visible narration. Without it the user
@@ -147,13 +147,7 @@ progress_event OK "recovery complete; stranded events returned to pending queue"
 deliver() { # batch: retry resume with backoff, ack on success, give up loudly
   local batch="$1" attempt=0 wait="$backoff" autonomy wake
   autonomy="$(cfg_get "${COORD_CONFIG:-$PWD/.coordinator/config.conf}" autonomy 2>/dev/null || true)"
-  if [ "$brief" = 1 ]; then
-    # lean wake: a fresh headless session gets a self-contained brief instead
-    # of a pointer into the fat host transcript (cut the host's cache-read
-    # spiral; continuity lives in files). wake.sh assembles it.
-    wake="$("$HERE/wake.sh" "$COORD_ROOT" "$batch" 2>/dev/null || true)"
-    [ -n "$wake" ] || wake="WAKE batch=$batch — route these events (brief assembly failed; see wake.sh)"
-  elif [ "$autonomy" = "auto-merge" ]; then
+  if [ "$autonomy" = "auto-merge" ]; then
     # test/unattended runs: merges are pre-authorized by config, so never tell
     # the coordinator to stop and ask
     wake="WAKE batch=$batch — route each event and merge passed slices directly: this run is configured autonomy=auto-merge, so no human approval is required."
