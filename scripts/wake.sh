@@ -13,6 +13,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS="$(cd "$HERE/.." && pwd)/scripts"
 root="${1:?root}"
 batch="${2:?batch}"
 
@@ -47,9 +48,9 @@ ledger yet. Plan this run into small vertical slices now:
 2. For each slice write a worker brief at .coordinator/<id>.prompt
    (self-contained: goal, output contract, and REPEAT the exact finish.sh
    command at the bottom of the brief).
-3. Register each slice: scripts/state.sh add <id> "<goal>".
-4. run scripts/state.sh ready, then dispatch the FIRST slice:
-   scripts/spawn.sh --role worker --prompt .coordinator/<id>.prompt
+3. Register each slice: __SCRIPTS__/state.sh add <id> "<goal>".
+4. run __SCRIPTS__/state.sh ready, then dispatch the FIRST slice:
+   __SCRIPTS__/spawn.sh --role worker --prompt .coordinator/<id>.prompt
    --worktree .coordinator/worktrees/<id>-<id> --slice <id>
 5. git add -A and commit nothing else; end the turn.
 EOF
@@ -68,7 +69,7 @@ You are the coordinator, routing events for this run. State lives in files:
 $repo/.coordinator (ledger.tsv, briefs/*.prompt, worktrees/). Act only in
 that repo; never invent state.
 
-Task->slice: run  scripts/state.sh resolve <task>  (exact id; else a trailing
+Task->slice: run  __SCRIPTS__/state.sh resolve <task>  (exact id; else a trailing
 -<suffix> or .<round> stripped; else exit 1). Never guess.
 
 For EACH event in the batch:
@@ -76,16 +77,16 @@ For EACH event in the batch:
   critic assignment file .coordinator/<id>.critic.prompt (independent critic;
   review ONLY the staged changes in the worktree; read-only; must call the
   finish.sh contract), then dispatch:
-    scripts/spawn.sh --role critic --prompt <that file> --worktree .coordinator/worktrees/<id>-<id> --slice <id>
+    __SCRIPTS__/spawn.sh --role critic --prompt <that file> --worktree .coordinator/worktrees/<id>-<id> --slice <id>
   Never re-dispatch a slice already 'reviewing' in the ledger.
-- VERDICT <task>: pass @ <hash> -> scripts/state.sh verdict <id> <round> pass <hash>;
-  then $merge_note: scripts/merge.sh --slice <id> (authors, merges, pushes).
+- VERDICT <task>: pass @ <hash> -> __SCRIPTS__/state.sh verdict <id> <round> pass <hash>;
+  then $merge_note: __SCRIPTS__/merge.sh --slice <id> (authors, merges, pushes).
 - VERDICT <task>: handback -> write a correction brief .coordinator/<id>.r2.prompt
   and respawn the SAME worker with the round-2 slug via spawn.sh --slice <id>.
-- Unknown task: run scripts/state.sh resolve <task>; if it fails, report the
+- Unknown task: run __SCRIPTS__/state.sh resolve <task>; if it fails, report the
   error and end the turn — never guess.
 
 git add -A anything you write. End your turn after routing every event.
 EOF
   fi
-} | tr -d '\r'
+} | sed "s|__SCRIPTS__|$SCRIPTS|g" | tr -d '\r'
