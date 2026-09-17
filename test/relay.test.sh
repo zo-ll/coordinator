@@ -50,19 +50,20 @@ printf '%s\n' "$*" >> "$RELAY_LOG"
 EOF
 chmod +x "$TMP/brief-resume"
 export COORD_ROOT="$TMP/root4"
-mkdir -p "$TMP/.coordinator"
-printf 'a\tdispatched\t-\ta\t1\t\t\t\t\t\t\t\n' > "$TMP/.coordinator/ledger.tsv"
+mkdir -p "$TMP/tinyproj/.coordinator"
+printf 'a\tdispatched\t-\ta\t1\t\t\t\t\t\t\t\n' > "$TMP/tinyproj/.coordinator/ledger.tsv"
 "$QUEUE" enqueue lean2 'DONE b: done' >/dev/null
 "$QUEUE" enqueue lean1 'DONE a: done — one' >/dev/null
 : > "$RELAY_LOG"; rm -f "$BRIEF_COUNT"
-COORD_RESUME="$TMP/brief-resume|__BATCH__" RELAY_BRIEF=1 RELAY_DRAIN=1 "$RELAY" --once --interval 0.2
-assert "$(cat "$BRIEF_COUNT")" "1"
+COORD_RESUME="$TMP/brief-resume|__BATCH__" RELAY_BRIEF=1 "$RELAY" --once --interval 0.2
 assert "$(grep -c 'EVENT lean' "$RELAY_LOG")" "2"
 grep -q 'COORDINATOR WAKE' "$RELAY_LOG" || { echo "  no brief header in wake"; exit 1; }
 grep -q 'state.sh resolve' "$RELAY_LOG" || { echo "  routing rules missing from brief"; exit 1; }
+assert "$(grep -c 'COORDINATOR WAKE' "$RELAY_LOG")" "1"
 export COORD_ROOT="$TMP/coord"
 
 # a wave already queued before the relay starts -> exactly one batch
+: > "$RELAY_LOG"
 for i in $(seq 1 20); do
   "$QUEUE" enqueue "t$i" "DONE t$i: done — x" >/dev/null
 done
