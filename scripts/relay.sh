@@ -50,12 +50,17 @@ once=0
 interval="${RELAY_INTERVAL:-1}"
 max_attempts="${RELAY_MAX_ATTEMPTS:-5}"
 backoff="${RELAY_BACKOFF:-2}"
+drain="${RELAY_DRAIN:-0}"
+brief=0
+[ "${RELAY_BRIEF:-}" = 1 ] && brief=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --once)         once=1; shift ;;
     --interval)     interval="$2"; shift 2 ;;
     --max-attempts) max_attempts="$2"; shift 2 ;;
     --backoff)      backoff="$2"; shift 2 ;;
+    --drain)        drain="$2"; shift 2 ;;
+    --brief)        brief=1; shift ;;
     *) echo "relay.sh: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -96,12 +101,19 @@ resume() { # pointer
     return 1
   }
   session="$(session_id)"
-  local server="${COORD_OPENCODE_SERVER:-}"
+  local server="${COORD_OPENCODE_SERVER:-}" repo
+  repo="${COORD_REPO:-}"
+  if [ -z "$repo" ]; then
+    repo="$(dirname "$COORD_ROOT")/tinyproj"
+    [ -d "$repo/.coordinator" ] || repo="$(dirname "$(dirname "$COORD_ROOT")")"
+  fi
   IFS='|' read -r -a argv <<< "$recipe"
   for i in "${!argv[@]}"; do
     argv[$i]="${argv[$i]//__BATCH__/$pointer}"
     argv[$i]="${argv[$i]//__SESSION__/$session}"
     argv[$i]="${argv[$i]//__SERVER__/$server}"
+    argv[$i]="${argv[$i]//__REPO__/$repo}"
+    argv[$i]="${argv[$i]//__WAKE__/$pointer}"
   done
   # Capture the wake command's output: for headless-turn harnesses (claude,
   # opencode) this is the coordinator's visible narration. Without it the user
@@ -135,7 +147,13 @@ progress_event OK "recovery complete; stranded events returned to pending queue"
 deliver() { # batch: retry resume with backoff, ack on success, give up loudly
   local batch="$1" attempt=0 wait="$backoff" autonomy wake
   autonomy="$(cfg_get "${COORD_CONFIG:-$PWD/.coordinator/config.conf}" autonomy 2>/dev/null || true)"
-  if [ "$autonomy" = "auto-merge" ]; then
+  if [ "$brief" = 1 ]; then
+    # lean wake: a fresh headless session gets a self-contained brief instead
+    # of a pointer into the fat host transcript (cut the host's cache-read
+    # spiral; continuity lives in files). wake.sh assembles it.
+    wake="$("$HERE/wake.sh" "$COORD_ROOT" "$batch" 2>/dev/null || true)"
+    [ -n "$wake" ] || wake="WAKE batch=$batch — route these events (brief assembly failed; see wake.sh)"
+  elif [ "$autonomy" = "auto-merge" ]; then
     # test/unattended runs: merges are pre-authorized by config, so never tell
     # the coordinator to stop and ask
     wake="WAKE batch=$batch — route each event and merge passed slices directly: this run is configured autonomy=auto-merge, so no human approval is required."
@@ -174,6 +192,21 @@ while :; do
     progress_phase claim "batch=$batch"
     if claimed="$("$QUEUE" pop-batch "$batch")"; then
       progress_event OK "$claimed"
+      # coalesce: absorb events that land within the drain window into THIS
+      # batch, so related completions route in one lean turn instead of N
+      if [ "$drain" -gt 0 ]; then
+        i=0
+        while [ "$i" -lt 10 ] && "$QUEUE" pending; do
+          tmp="$COORD_ROOT/batch/.drain.$$.$i.txt"
+          if "$QUEUE" pop-batch "$tmp" >/dev/null 2>&1; then
+            cat "$tmp" >> "$batch" 2>/dev/null || true
+            progress_event OK "drain absorbed $tmp into $batch"
+          fi
+          rm -f "$tmp"
+          sleep "$drain"
+          i=$(( i + 1 ))
+        done
+      fi
       deliver "$batch" || exit 1
       if [ "$once" = 1 ]; then progress_note="one batch delivered; relay stopped as requested by --once"; exit 0; fi
     fi
