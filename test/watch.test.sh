@@ -32,43 +32,51 @@ echo "ran pytest: 3 failed" >> .coordinator/log/busy1.r1.worker.log
 printf 'GOAL: pick a queue\n' > "$TMP/rb"; "$COORD" research --brief "$TMP/rb" >/dev/null
 wait_for grep -q 'role=researcher.*result=done\|result=done.*research' "$COORD_EVENTS"
 
-out="$(frame 60)"
+out="$(frame 80)"
 has "$out" "coordinator  ✗ stuck: the wake process is down"     # no relay in tests
 has "$out" "NOTHING WILL MOVE"
-has "$out" "PENDING ━"
-has "$out" "▸ ■ dead1  blocked: agent died twice"
-has "$out" "▲ pass1  passed review · round 1 · ●●○ tests"
-has "$out" '"looks right"'
-has "$out" "? decision  which retry library?"
-has "$out" "≡ report  recommend B"
-has "$out" "o reopen  x drop  ↵ details"                         # keys only on the ▸ item
-has "$out" "◐ busy1  worker · round 1"
+hasnt "$out" "PENDING"
+has "$out" "needs you    ▲ pass1 · ■ dead1 · ? G1 · ≡ research.1"
+has "$out" "─ WORK "
+has "$out" "▸▲ pass1  passed · needs your approval"                  # approve-merge in tests
+has "$out" 'critic: looks right'
+has "$out" "coord/pass1 · 1 file +1 −0 · file.txt · .coordinator/worktrees/pass1"
+has "$out" " ■ dead1  blocked: agent died twice"
+has "$out" " ◐ busy1  being built · round 1"
+has "$out" "worker r1 · 0/60m · output"
 has "$out" "└ ran pytest: 3 failed"
-has "$out" "◐ busy1         feature   being built · round 1"
+has "$out" "? decision G1  which retry library?"
+has "$out" "≡ research.1  report ready: recommend B"
 has "$out" "up next  ○ next1, waiting on busy1"
 has "$out" "done     ✓ done1"
 has "$out" "critic passed pass1 · round 1 · tests"
-has "$out" "merged done1"
+has "$out" "a approve  r reject  j/k move"                            # keys follow the ▸ item
 # every line fits the width
 [ "$(frame 44 | awk '{ print length($0) }' | sort -n | tail -1)" -le 44 ] || { echo "  wider than 44"; exit 1; }
-hasnt "$(frame 44)" "feature   being built"                        # the kind column goes first
 
-# keys: tab to the passed unit, approve -> approved and merged
-out="$(frame 60 --press $'\ta')"
-has "$out" "› ok: MERGED pass1"
+# keys: approve the selected passed unit -> approved and merged
+has "$(frame 80 --press a)" "› ok: MERGED pass1"
 assert "$(state_of pass1)" merged
-# the gate is now selected (dead1 then the gate): confirm the default
-out="$(frame 60 --press $'\tc')"
-has "$out" "ok: GATE G1 decided: hand-rolled"
-# reading the report clears it from the waiting box
-out="$(PAGER=true frame 60 --press $'\tv')"
-hasnt "$(frame 60)" "≡ report"
-# reopen the blocked unit
-has "$(frame 60 --press o)" "ok: REOPENED dead1"
+# move to the decision (dead1, busy1, G1) and confirm the default
+has "$(frame 80 --press jjc)" "ok: GATE G1 decided: hand-rolled"
+# reading the report clears it from what needs you
+PAGER=true frame 80 --press jjv >/dev/null
+hasnt "$(frame 80)" "≡ research.1"
+# reopen the blocked unit (selected first now)
+has "$(frame 80 --press o)" "ok: REOPENED dead1"
 # a refused action shows the engine's reason (no session: the relay can't start)
-has "$(frame 60 --press w)" "✗ refused: no session for this run (coord init)"
+has "$(frame 80 --press w)" "✗ refused: no session for this run (coord init)"
 # messages and prompts read their answer from the reply line
-has "$(echo "use httpx" | frame 60 --press m)" "ok: sent; the coordinator wakes to read it"
+has "$(echo "use httpx" | frame 80 --press m)" "ok: sent; the coordinator wakes to read it"
 has "$("$COORD" log)" "msg - use httpx"
+
+# auto-merge: a clean pass isn't "needs you", a pass with notes is
+printf 'autonomy=auto-merge\n' >> .coordinator/config.conf
+"$COORD" unit add noted --kind chore --goal noted >/dev/null
+"$COORD" dispatch noted --role worker --brief "$TMP/brief" >/dev/null; wait_for is_state noted built
+FAKE_CRITIC=notepass "$COORD" dispatch noted --role critic >/dev/null; wait_for is_state noted passed
+out="$(frame 80)"
+has "$out" "▲ noted  passed with notes · needs you"
+has "$out" "notes: check the migration"
 
 echo "  watch ok"

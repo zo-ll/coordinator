@@ -37,14 +37,16 @@ help_verb() {
     watch) cat <<'EOF'
 coord watch                                 the live view (in its own terminal)
 coord watch --once [--width N] [--height N] one frame on stdout, then exit
-  The only command meant for people. It shows what waits for you (units to
-  approve, blocked units, open decisions, research reports), whether the
-  coordinator is moving, the agents at work, every unit, and recent events;
-  it redraws once a second. Keys act on the ▸ waiting item: a approve (and
-  merge), r reject with a note, o/x reopen/drop, c/d confirm/change a
-  decision, v read a report, tab next item; ↵ opens a unit in $PAGER,
-  m messages the coordinator, w restarts a stopped wake process, ? keys,
-  q quits (the run keeps going). NO_COLOR turns colors off.
+  The only command meant for people. It shows whether the coordinator is
+  moving, one "needs you" line when something waits on you, and WORK: every
+  unit in progress with its agent (role, round, time, liveness, latest
+  output), its branch, worktree and changed files, and the critic's notes;
+  open decisions and research reports; then up next, done, and recent events.
+  It redraws once a second. j/k (or arrows, tab) select an item and keys act
+  on it: a approve (and merge), r reject with a note, o/x reopen/drop, c/d
+  confirm/change a decision, v read a report, ↵ open in $PAGER; m messages
+  the coordinator, w restarts a stopped wake process, ? keys, q quits (the
+  run keeps going). NO_COLOR turns colors off.
 EOF
     ;;
     init) cat <<'EOF'

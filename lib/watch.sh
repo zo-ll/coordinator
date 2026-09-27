@@ -63,7 +63,7 @@ wrap() { fold -s -w "$2" <<< "$1" | sed 's/ *$//' | head -n "$3"; }
 
 watch_gather() {
   NOW=$(printf '%(%s)T' -1)
-  UNITS=(); FEED=(); PEND=(); AGENTS=()
+  UNITS=(); FEED=(); ITEMS=(); NEED=()
   declare -gA REASON=() CRITIC=() STATE=() REPORT=()
   RUN_START="" WOKE_TS="" WOKE_FOR="" ACKED=""
   [ -f "$LOG" ] || return 1
@@ -89,6 +89,7 @@ watch_gather() {
   UNDELIVERED=$(model undelivered | grep -c . || true)
   INFLIGHT=$(model inflight)
   RESEARCH_LIVE=$(model research)
+  AUTO=0; [ "$(cfg_val "$CONFIG" autonomy)" = auto-merge ] && AUTO=1
   OPEN=0
   for line in "${UNITS[@]}"; do case $(cut -d"$US" -f2 <<< "$line") in merged|dropped) ;; *) OPEN=$((OPEN + 1)) ;; esac; done
   # the wake process is only missed while something is left to deliver or do
@@ -96,19 +97,40 @@ watch_gather() {
   [ "$RELAY_UP" = 1 ] || { [ "$OPEN" -eq 0 ] && [ "$UNDELIVERED" -eq 0 ] && [ "${#UNITS[@]}" -gt 0 ]; } || STUCK=1
 }
 
-# the run's pending items, in order: blocked, passed, open gates, unread reports
-watch_pending() {
-  local row id st g slug
-  for row in "${UNITS[@]}"; do IFS=$US read -r id st _ <<< "$row"; [ "$st" = blocked ] && PEND+=("unit"$'\t'"$id"); done
-  for row in "${UNITS[@]}"; do IFS=$US read -r id st _ <<< "$row"; [ "$st" = passed ] && PEND+=("unit"$'\t'"$id"); done
+# watch_items: the WORK list, in a stable order: units in progress (creation
+# order), open decisions, unread research reports, live researchers. ITEMS
+# holds "kind<TAB>id"; NEED counts what waits on the user.
+watch_items() {
+  local row id st g slug pid
+  ITEMS=(); NEED=()
+  for row in "${UNITS[@]}"; do
+    IFS=$US read -r id st _ <<< "$row"
+    case $st in todo|merged|dropped) continue ;; esac
+    ITEMS+=("unit"$'\t'"$id")
+    needs_you "$row" && NEED+=("$(glyph "$st") $id")
+  done
   if [ -f "$RUN/gates.tsv" ]; then
-    while IFS=$'\t' read -r g st _; do [ "$st" = open ] && PEND+=("gate"$'\t'"$g"); done < "$RUN/gates.tsv"
+    while IFS=$'\t' read -r g st _; do [ "$st" = open ] && { ITEMS+=("gate"$'\t'"$g"); NEED+=("? $g"); }; done < "$RUN/gates.tsv"
   fi
   for slug in $(printf '%s\n' "${!REPORT[@]}" | sort -t. -k2 -n); do
-    grep -qxF "$slug" "$RUN/watch.read" 2>/dev/null || PEND+=("report"$'\t'"$slug")
+    grep -qxF "$slug" "$RUN/watch.read" 2>/dev/null || { ITEMS+=("report"$'\t'"$slug"); NEED+=("≡ $slug"); }
   done
-  [ "${#PEND[@]}" -gt 0 ] || { SEL=0; return 0; }
-  [ "$SEL" -lt "${#PEND[@]}" ] || SEL=$(( ${#PEND[@]} - 1 ))
+  while IFS=$US read -r slug pid _; do
+    [ -n "$slug" ] && alive "$pid" && ITEMS+=("research"$'\t'"$slug")
+  done <<< "$RESEARCH_LIVE"
+  [ "${#ITEMS[@]}" -gt 0 ] || { SEL=0; return 0; }
+  [ "$SEL" -lt "${#ITEMS[@]}" ] || SEL=$(( ${#ITEMS[@]} - 1 ))
+}
+
+# needs_you <row>: a unit that waits on the user
+needs_you() {
+  local st notes risk
+  IFS=$US read -r _ st _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ risk _ notes <<< "$1"
+  case $st in
+    blocked) return 0 ;;
+    passed) [ "$AUTO" != 1 ] || [ -n "$notes" ] || [ -n "$risk" ] ;;
+    *) return 1 ;;
+  esac
 }
 
 # ---------------------------------------------------------------- frame
@@ -123,8 +145,8 @@ EVL_none='○○○' EVL_typecheck='●○○' EVL_tests='●●○' EVL_live='�
 
 # sentence <row>: what a unit is doing, in words
 sentence() {
-  local id st kind round deps d waits=""
-  IFS=$US read -r id st kind round _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ deps _ <<< "$1"
+  local id st kind round deps d waits="" notes risk
+  IFS=$US read -r id st kind round _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ deps risk _ notes <<< "$1"
   case $st in
     todo)
       local IFS=,
@@ -133,7 +155,10 @@ sentence() {
     working)   printf 'being built · round %s' "$round" ;;
     built)     printf 'built · waiting for review' ;;
     reviewing) printf 'being reviewed · round %s' "$round" ;;
-    passed)    m y 'passed · needs approval' ;;
+    passed)
+      if [ -n "$notes" ]; then m y 'passed with notes · needs you'
+      elif [ -n "$risk" ] || [ "$AUTO" != 1 ]; then m y 'passed · needs your approval'
+      else printf 'passed · merging'; fi ;;
     approved)  printf 'approved · merging' ;;
     handback)  printf 'sent back: %s' "$(clean "${REASON[$id]:-see its history}")" ;;
     stalled)   m r 'agent died · restarting' ;;
@@ -143,42 +168,16 @@ sentence() {
   esac
 }
 
-pend_keys() { # the keys for the selected pending item
+item_keys() { # the keys for the selected item
   local kind=${1%%$'\t'*} id=${1#*$'\t'}
   case $kind in
     unit) case ${STATE[$id]} in
-            passed)  printf '%s approve  %s reject  %s details' "$(m k a)" "$(m k r)" "$(m k ↵)" ;;
-            blocked) printf '%s reopen  %s drop  %s details' "$(m k o)" "$(m k x)" "$(m k ↵)" ;;
+            passed)  printf '%s approve  %s reject  ' "$(m k a)" "$(m k r)" ;;
+            blocked) printf '%s reopen  %s drop  ' "$(m k o)" "$(m k x)" ;;
           esac ;;
-    gate)   printf '%s confirm  %s change' "$(m k c)" "$(m k d)" ;;
-    report) printf '%s read' "$(m k v)" ;;
+    gate)   printf '%s confirm  %s change  ' "$(m k c)" "$(m k d)" ;;
+    report) printf '%s read  ' "$(m k v)" ;;
   esac
-}
-
-# pend_lines <index> <width>: an item's lines inside the box
-pend_lines() {
-  local item=${PEND[$1]} w=$2 kind id mark="  " crit round level summary l g st q opts def
-  kind=${item%%$'\t'*} id=${item#*$'\t'}
-  [ "$1" = "$SEL" ] && mark="$(m y ▸) "
-  case $kind in
-    unit)
-      if [ "${STATE[$id]}" = passed ]; then
-        IFS=$'\t' read -r round level summary <<< "${CRITIC[$id]:-}"
-        local evl="EVL_${level:-none}"
-        echo "$mark$(glyph passed) $(m b "$id")  passed review $(m d ·) round ${round:-?} $(m d ·) ${!evl:-} ${level:-none}"
-        [ -z "$summary" ] || while IFS= read -r l; do echo "    $l"; done < <(wrap "\"$(clean "$summary")\"" $((w - 8)) 2)
-      else
-        echo "$mark$(glyph blocked) $(m b "$id")  $(m r "blocked: $(clean "${REASON[$id]:-}")")"
-      fi ;;
-    gate)
-      IFS=$US read -r g st q opts def _ < <(awk -F'\t' -v OFS="$US" -v id="$id" '$1 == id { $1 = $1; print }' "$RUN/gates.tsv")
-      echo "$mark$(m y ?) $(m b decision)  $(clean "$q")"
-      echo "    default: $(clean "$def") $(m d '· the coordinator went with it')" ;;
-    report)
-      IFS=$'\t' read -r _ _ summary <<< "${REPORT[$id]}"
-      echo "$mark$(m y ≡) $(m b report)  $(clean "$summary")" ;;
-  esac
-  [ "$1" != "$SEL" ] || echo "    $(pend_keys "$item")"
 }
 
 box() { # box <title> <right> <color> <width> lines... : a heavy box
@@ -197,39 +196,80 @@ last_line() {
   tail -c 4000 "$1" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | tr -d '\r' | awk 'NF { l = $0 } END { gsub(/[ \t]+/, " ", l); sub(/^ /, "", l); print l }'
 }
 
-agent_lines() { # agent_lines <width>
-  local w=$1 row id st kind round role owes pid wt br base wb logf disp tb used lim live age warn slug rep lg
-  for row in "${UNITS[@]}"; do
-    IFS=$US read -r id st kind round role owes pid wt br base wb logf disp tb _ <<< "$row"
-    [ -n "$owes" ] || continue
-    AGENTS+=("$id")
-    used=$(( (NOW - ${disp%.*}) / 60 )); lim=$(( ${tb:-1800} / 60 ))
-    age=$(( NOW - $(stat -c %Y "$logf" 2>/dev/null || echo "${disp%.*}") ))
-    warn=0; [ "$age" -ge 120 ] && warn=1
-    live="output $(span "$age") ago"; [ "$warn" = 1 ] && live=$(m y "quiet $(span "$age")") || live=$(m d "$live")
-    local t="$used/${lim}m"; [ $((used * 100)) -ge $((lim * 85)) ] && t=$(m y "$t")
-    local g=◐; [ "$role" = critic ] && g=◑
-    echo "$(lr " $g $(m b "$id")  $(m d "$role · round $round")" "$t  $live " "$w")"
-    echo "   $(m d └) $(clean "$(last_line "$logf")")"
-  done
-  while IFS=$US read -r slug pid rep lg disp tb; do
-    [ -n "$slug" ] && alive "$pid" || continue
-    AGENTS+=("$slug")
-    age=$(( NOW - $(stat -c %Y "$lg" 2>/dev/null || echo "${disp%.*}") ))
-    echo "$(lr " ≡ $(m b "$slug")  $(m d researcher)" "$(( (NOW - ${disp%.*}) / 60 ))/$(( ${tb:-1800} / 60 ))m  $(m d "output $(span "$age") ago") " "$w")"
-    echo "   $(m d └) $(clean "$(last_line "$lg")")"
-  done <<< "$RESEARCH_LIVE"
+# agent_state <role> <round> <dispatched> <timebox> <log>: "worker r2 · 18/30m · output 4s ago"
+agent_state() {
+  local used lim age t live
+  used=$(( (NOW - ${3%.*}) / 60 )); lim=$(( ${4:-1800} / 60 ))
+  age=$(( NOW - $(stat -c %Y "$5" 2>/dev/null || echo "${3%.*}") ))
+  t="$used/${lim}m"; [ $((used * 100)) -ge $((lim * 85)) ] && t=$(m y "$t")
+  if [ "$age" -ge 120 ]; then live=$(m y "quiet $(span "$age")"); else live=$(m d "output $(span "$age") ago"); fi
+  printf '%s %s · %s · %s' "$(m d "$1")" "$(m d "r$2")" "$t" "$live"
 }
 
-unit_lines() { # unit_lines <width>
-  local w=$1 row id st kind next="" done_="" col
+# wt_changes <worktree>: "3 files (1 new) +42 −8", from git
+wt_changes() {
+  local short new files=0 ins=0 del=0
+  [ -d "$1" ] || return 0
+  short=$(git -C "$1" diff --shortstat HEAD 2>/dev/null || true)
+  new=$(git -C "$1" ls-files --others --exclude-standard 2>/dev/null | grep -c . || true)
+  [[ $short =~ ([0-9]+)\ file ]] && files=${BASH_REMATCH[1]}
+  [[ $short =~ ([0-9]+)\ insertion ]] && ins=${BASH_REMATCH[1]}
+  [[ $short =~ ([0-9]+)\ deletion ]] && del=${BASH_REMATCH[1]}
+  files=$((files + new))
+  if [ "$files" -eq 0 ]; then printf 'no changes yet'; return; fi
+  printf '%s file%s' "$files" "$([ "$files" = 1 ] || echo s)"
+  [ "$new" -eq 0 ] || printf ' (%s new)' "$new"
+  printf ' %s %s' "$(m g "+$ins")" "$(m r "−$del")"
+  # the changed files' names, newest work first in the eye: basenames, comma-separated
+  printf ' %s %s' "$(m d ·)" "$( { git -C "$1" diff --name-only HEAD 2>/dev/null; git -C "$1" ls-files --others --exclude-standard 2>/dev/null; } | awk -F/ 'NF { printf "%s%s", (n++ ? ", " : ""), $NF }')"
+}
+
+# item_lines <index> <width>: one WORK item's lines
+item_lines() {
+  local item=${ITEMS[$1]} w=$2 kind id mark=" " row st round role owes pid wt br logf disp tb notes l
+  kind=${item%%$'\t'*} id=${item#*$'\t'}
+  [ "$1" = "$SEL" ] && mark=$(m y ▸)
+  case $kind in
+    unit)
+      for row in "${UNITS[@]}"; do [ "${row%%"$US"*}" = "$id" ] && break; done
+      IFS=$US read -r _ st _ round role owes pid wt br _ _ logf disp tb _ _ _ _ _ _ _ _ notes <<< "$row"
+      local head; head="$mark$(glyph "$st") $(m b "$id")  $(sentence "$row")"
+      if [ -z "$owes" ]; then echo "$head"
+      elif [ "$w" -ge 80 ]; then echo "$(lr "$head" "$(agent_state "$role" "$round" "$disp" "$tb" "$logf") " "$w")"
+      else echo "$head"; echo "    $(agent_state "$role" "$round" "$disp" "$tb" "$logf")"; fi
+      [ -z "$owes" ] || echo "    $(m d └) $(clean "$(last_line "$logf")")"
+      [ -z "$wt" ] || echo "    $(m c "$br") $(m d ·) $(wt_changes "$wt") $(m d "· ${wt#"$REPO"/}")"
+      if [ "$st" = passed ]; then
+        if [ -n "$notes" ]; then
+          while IFS= read -r l; do echo "    $(m y "$l")"; done < <(wrap "notes: $(clean "$notes")" $((w - 6)) 3)
+        elif needs_you "$row"; then
+          local cr cl cs; IFS=$'\t' read -r cr cl cs <<< "${CRITIC[$id]:-}"
+          [ -z "$cs" ] || while IFS= read -r l; do echo "    $(m d "$l")"; done < <(wrap "critic: $(clean "$cs")" $((w - 6)) 2)
+        fi
+      fi ;;
+    gate)
+      local g q opts def
+      IFS=$US read -r g st q opts def _ < <(awk -F'\t' -v OFS="$US" -v id="$id" '$1 == id { $1 = $1; print }' "$RUN/gates.tsv")
+      echo "$mark$(m y ?) $(m b "decision $g")  $(clean "$q")"
+      echo "    default: $(clean "$def") $(m d '· the coordinator went with it')" ;;
+    report)
+      local summary; IFS=$'\t' read -r _ _ summary <<< "${REPORT[$id]}"
+      echo "$mark$(m y ≡) $(m b "$id")  report ready: $(clean "$summary")" ;;
+    research)
+      local slug rep lg
+      while IFS=$US read -r slug pid rep lg disp tb; do [ "$slug" = "$id" ] && break; done <<< "$RESEARCH_LIVE"
+      echo "$(lr "$mark≡ $(m b "$id")  researching" "$(agent_state researcher 1 "$disp" "$tb" "$lg") " "$w")"
+      echo "    $(m d └) $(clean "$(last_line "$lg")")" ;;
+  esac
+}
+
+queue_lines() { # up next and done, one line each
+  local row id st next="" done_=""
   for row in "${UNITS[@]}"; do
-    IFS=$US read -r id st kind _ <<< "$row"
+    IFS=$US read -r id st _ <<< "$row"
     case $st in
       todo) next+="  ○ $id$( [ "$(sentence "$row")" = 'ready to start' ] || printf ', %s' "$(sentence "$row")")" ;;
       merged|dropped) done_+="  $(glyph "$st") $id" ;;
-      *) if [ "$w" -ge 56 ]; then col=$(printf '%-10s' "$kind"); col=$(m d "$col"); else col=""; fi
-         echo " $(glyph "$st") $(printf '%-13s ' "$id")$col$(sentence "$row")" ;;
     esac
   done
   [ -z "$next" ] || echo "$(m d "   up next$next")"
@@ -244,8 +284,9 @@ coordinator_line() {
     s="● working on a turn $(m d "· $(span $((NOW - ${WOKE_TS:-$NOW})))")"
     [ -z "$WOKE_FOR" ] || s+=" $(m d '· woke for:') $WOKE_FOR"
   elif [ "$UNDELIVERED" -gt 0 ]; then s="◌ wake queued $(m d "· $UNDELIVERED event(s)")"
-  elif [ -n "$ACKED" ]; then s="○ idle $(m d "· last turn $(hm "$ACKED")")"
-  else s="○ idle"
+  # a delivered wake may still be queued inside the harness (codex): say when, not "idle"
+  elif [ -n "$ACKED" ]; then s="○ last woken $(hm "$ACKED") $(m d "· $(span $((NOW - ACKED))) ago")"
+  else s="○ not woken yet"
   fi
   printf ' coordinator  %s' "$s"
 }
@@ -258,10 +299,15 @@ watch_frame() {
     FRAME=(" $(m b 'coord watch')" '' "   $(m d 'No run here yet. Ask your agent to coordinate some work;')" "   $(m d 'this screen follows it as soon as it starts.')")
     KEYS=" $(m k q) quit"; return
   fi
-  watch_pending
+  watch_items
   local right; right="run $(span $((NOW - ${RUN_START:-$NOW}))) · $(printf '%(%H:%M:%S)T' "$NOW")"
   body+=("$(lr " $(m b 'coord watch') $(m d ·) ${REPO##*/}" "$(m d "$right") " "$w")")
-  body+=("$(coordinator_line)" '')
+  body+=("$(coordinator_line)")
+  if [ "${#NEED[@]}" -gt 0 ]; then
+    local nl="" x; for x in "${NEED[@]}"; do nl+="${nl:+ $(m d ·) }$x"; done
+    body+=(" $(m yb 'needs you')    $nl")
+  fi
+  body+=('')
   if [ "$STUCK" = 1 ]; then
     local why=() last
     last=$(clean "$(tail -n1 "$RUN/log/relay.log" 2>/dev/null)")
@@ -270,15 +316,6 @@ watch_frame() {
     [ -z "$last" ] || why+=("  $(m d "last said: $last")")
     why+=("  $(m k w) restart it")
     mapfile -t -O "${#body[@]}" body < <(box 'NOTHING WILL MOVE' '' r "$w" "${why[@]}")
-    body+=('')
-  fi
-  if [ "${#PEND[@]}" -gt 0 ]; then
-    local items=()
-    for i in "${!PEND[@]}"; do
-      [ "$i" = 0 ] || items+=('')
-      mapfile -t -O "${#items[@]}" items < <(pend_lines "$i" "$w")
-    done
-    mapfile -t -O "${#body[@]}" body < <(box PENDING "${#PEND[@]}" y "$w" "${items[@]}")
     body+=('')
   fi
   if [ "${#UNITS[@]}" -gt 0 ] && [ "$OPEN" -eq 0 ]; then
@@ -293,12 +330,12 @@ watch_frame() {
     mapfile -t -O "${#body[@]}" body < <(box 'RUN FINISHED' "$merged merged" g "$w" "${shipped[@]}")
     body+=('')
   else
-    local ag; mapfile -t ag < <(agent_lines "$w")
-    body+=("$(rule AGENTS "$( [ "${#ag[@]}" -gt 0 ] && m d "$(( ${#ag[@]} / 2 )) running")" "$w")")
-    [ "${#ag[@]}" -gt 0 ] && body+=("${ag[@]}") || body+=("$(m d '   none running')")
-    body+=('' "$(rule UNITS "$(m d "${#UNITS[@]}")" "$w")")
-    if [ "${#UNITS[@]}" -gt 0 ]; then mapfile -t -O "${#body[@]}" body < <(unit_lines "$w")
-    else body+=("$(m d '   none yet: the coordinator is still planning')"); fi
+    body+=("$(rule WORK "$(m d "${#ITEMS[@]} active")" "$w")")
+    if [ "${#ITEMS[@]}" -gt 0 ]; then
+      for i in "${!ITEMS[@]}"; do mapfile -t -O "${#body[@]}" body < <(item_lines "$i" "$w"); done
+    elif [ "${#UNITS[@]}" -eq 0 ]; then body+=("$(m d '   nothing yet: the coordinator is still planning')")
+    else body+=("$(m d '   nothing in progress')"); fi
+    mapfile -t -O "${#body[@]}" body < <(queue_lines)
     body+=('')
   fi
   body+=("$(rule RECENT '' "$w")")
@@ -307,11 +344,11 @@ watch_frame() {
     body+=("$(m d " $(hm "${FEED[i]%%$'\t'*}")")  ${FEED[i]#*$'\t'}")
   done
   FRAME=("${body[@]:0:$((h - 3))}")
-  local pk=""; [ "${#PEND[@]}" -eq 0 ] || pk="$(pend_keys "${PEND[$SEL]}")  "
-  [ "${#PEND[@]}" -lt 2 ] || pk+="$(m k tab) next  "
+  local pk=""
+  [ "${#ITEMS[@]}" -eq 0 ] || pk="$(item_keys "${ITEMS[$SEL]}")"
+  [ "${#ITEMS[@]}" -lt 2 ] || pk+="$(m k j/k) move  "
   [ "$STUCK" = 0 ] || pk+="$(m k w) restart wake  "
-  [[ $pk == *↵* ]] || pk+="$(m k ↵) open  "
-  KEYS=" $pk$(m k m) message  $(m k '?') keys  $(m k q) quit"
+  KEYS=" $pk$(m k ↵) open  $(m k m) message  $(m k '?') keys  $(m k q) quit"
 }
 
 # ---------------------------------------------------------------- terminal
@@ -390,31 +427,39 @@ keys_page() {
   cat > "$f" <<'EOF'
 coord watch keys
 
-On the ▸ waiting item
-  tab     next waiting item
-  a       approve a passed unit (then merge it, re-running its checks)
+Moving
+  j / k, ↓ / ↑, tab   select the next / previous item in WORK
+
+On the ▸ selected item
+  a       approve a passed unit and merge it (re-running its checks)
   r       send a passed unit back, with a note
   o / x   reopen / drop a blocked unit (drop asks first; it is final)
   c / d   confirm / change an open decision
   v       read a research report
+  ↵       open it: a unit's brief, critic, changes, checks, output and
+          history; a report; a researcher's output. With nothing
+          selected, asks which unit.
 
 Anywhere
-  ↵       open the ▸ unit: brief, critic, changes, checks, output, history
-          (with nothing selected, asks which unit)
   m       send the coordinator a message
   w       restart the wake process, when it is down
   ?       this page
   q       quit (the run keeps going)
+
+Clean passes merge on their own. A unit shows "needs you" when the critic
+left notes, the unit is marked risky, or it is blocked; open decisions and
+unread reports need you too.
 EOF
   page "$f"
 }
 
 on_key() {
   local key=$1 item="" kind="" id=""
-  if [ "${#PEND[@]}" -gt 0 ]; then item=${PEND[$SEL]}; kind=${item%%$'\t'*}; id=${item#*$'\t'}; fi
+  if [ "${#ITEMS[@]}" -gt 0 ]; then item=${ITEMS[$SEL]}; kind=${item%%$'\t'*}; id=${item#*$'\t'}; fi
   case $key in
     q) return 1 ;;
-    $'\t') [ "${#PEND[@]}" -eq 0 ] || SEL=$(( (SEL + 1) % ${#PEND[@]} )) ;;
+    j|$'\t'|DOWN) [ "${#ITEMS[@]}" -eq 0 ] || SEL=$(( (SEL + 1) % ${#ITEMS[@]} )) ;;
+    k|UP)          [ "${#ITEMS[@]}" -eq 0 ] || SEL=$(( (SEL + ${#ITEMS[@]} - 1) % ${#ITEMS[@]} )) ;;
     a) if [ "$kind" = unit ] && [ "${STATE[$id]}" = passed ]; then
          W_REPLY=" $(m d ›) approving $id, then merging (re-running its checks)…"; [ "$W_LIVE" != 1 ] || draw
          run approve "$id" && run merge "$id"
@@ -439,6 +484,7 @@ on_key() {
     '') case $kind in
           unit) unit_page "$id" ;;
           report) echo "$id" >> "$RUN/watch.read"; page "$(cut -f1 <<< "${REPORT[$id]}")" ;;
+          research) page "$RUN/log/$id.log" ;;
           *) ask "$(m c 'open unit ›') "; [ -z "$ANSWER" ] || unit_page "$ANSWER" ;;
         esac ;;
   esac
@@ -468,7 +514,10 @@ cmd_watch() {
   while :; do
     draw
     if IFS= read -rsn1 -t 1 key; then
-      if [ "$key" = $'\e' ]; then IFS= read -rsn5 -t 0.01 k2 || true; continue; fi
+      if [ "$key" = $'\e' ]; then
+        IFS= read -rsn2 -t 0.01 k2 || true
+        case $k2 in '[A') key=UP ;; '[B') key=DOWN ;; *) continue ;; esac
+      fi
       on_key "$key" || break
     fi
   done

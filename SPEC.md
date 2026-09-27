@@ -358,13 +358,17 @@ reference, so SKILL.md does not repeat flags or output formats.
 `lib/watch.awk`, which turns events into plain sentences), `model units`,
 gates, launch logs, and the relay's pid; it never writes state except by
 running `coord` commands, whose one-line reply it shows. The screen, top to
-bottom: the coordinator's line (idle, working on a turn and what woke it,
-wake queued, or stuck), a red box when the relay is down while work remains,
-the PENDING box (blocked units, passed units, open gates, unread research
-reports; keys act on the selected item), agents, units as sentences, and the
-recent feed, which takes whatever rows are left. It redraws once a second and
-writes only the lines that changed. Approving from watch runs `approve` then
-`merge`, so a passed unit merges even while the coordinator is stuck; `merge`
+bottom: the coordinator's line (working on a turn and what woke it, wake
+queued, last woken, or stuck), a "needs you" line only when something waits
+on the user, a red box when the relay is down while work remains, WORK (each
+unit in progress with its agent's role, round, time, liveness and latest
+output line, its branch, worktree and changed files, and the critic's notes;
+open gates; unread reports; live researchers; a j/k cursor selects one and
+keys act on it), up next and done, and the recent feed, which takes whatever
+rows are left. It redraws once a second and
+writes only the lines that changed. Clean passes merge on their own (autonomy=auto-merge); approving from watch
+runs `approve` then `merge`, so a unit that needs the user merges even while
+the coordinator is stuck; `merge`
 holds a run-wide lock, so watch and the coordinator never merge at once.
 `--once` prints one frame for scripts and tests.
 

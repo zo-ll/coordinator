@@ -14,12 +14,13 @@ installed agent harness (codex, claude, pi, opencode, …) is enough.
 ## Following a run
 
 `coord watch` is the one command meant for people. Open it in a second
-terminal next to your agent: it shows what waits for you (units to approve,
-blocked units, open decisions, research reports), whether the coordinator is
-moving, the agents at work with their latest output, every unit, and what just
-happened. Keys act on what waits: `a` approves and merges, `r` sends back with
-a note, `m` messages the coordinator, `↵` opens a unit in your pager, `?`
-lists the rest.
+terminal next to your agent: it shows whether the coordinator is moving, the
+work in progress (each unit's agent and its latest output, branch, worktree
+and changed files), what needs you, and what just happened. Clean critic
+passes merge on their own; a pass with notes, a risky unit, a blocked unit, or
+an open decision needs you. Select with j/k: `a` approves and merges, `r`
+sends back with a note, `m` messages the coordinator, `↵` opens a unit in your
+pager, `?` lists the rest.
 
 ## How it works
 
