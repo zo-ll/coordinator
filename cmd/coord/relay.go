@@ -14,32 +14,27 @@ import (
 	"github.com/zo-ll/coordinator/internal/cfg"
 	"github.com/zo-ll/coordinator/internal/events"
 	"github.com/zo-ll/coordinator/internal/fsx"
-	"github.com/zo-ll/coordinator/internal/ledger"
-	"github.com/zo-ll/coordinator/internal/queue"
+	"github.com/zo-ll/coordinator/internal/model"
 )
 
-// Serial queue consumer: the only thing that turns workers' pings into a
-// coordinator turn.
+// The scheduler: the only thing that turns events into coordinator turns.
 //
 //	relay [--once] [--interval N] [--max-attempts N] [--backoff N]
 //
-// Loop: wait for the queue to be non-empty; claim every pending event, in
-// order, into one batch file; resume the coordinator with a one-line pointer
-// to it; wait for the turn to exit; ack the batch. One turn at a time.
+// One relay per run (a lock in .coordinator/). Each tick:
 //
-// Delivery is bounded: a failed resume is retried with exponential backoff up
-// to --max-attempts. On exhaustion the batch is returned to the queue and the
-// relay exits nonzero.
+//  1. Liveness: a live launch whose pid is gone without finishing gets
+//     `died reason=exited`.
+//  2. Timebox: a launch past its timebox gets SIGTERM on its process group,
+//     SIGKILL after timebox.grace (config, default 30s), then `died
+//     reason=timeout`. A second death in one round blocks the unit (by engine).
+//  3. Delivery: undelivered wake events are written, in order, to one batch
+//     file (then the standing orders) and `claimed`; the coordinator is
+//     resumed with `WAKE batch=<path>`; when its turn exits they are `acked`.
 //
-// Delivery is at-least-once: events stranded in .inflight by a crash are
-// requeued at startup, under the single-relay lock.
-//
-// Liveness: each loop, every dispatched/reviewing slice whose pid is gone and
-// whose owed finish slug was never enqueued becomes a `DIED <task>` event
-// (slug <task>.died.<pid>, so a respawn that dies again reports again).
-//
-// Standing orders ($COORD_STANDING, default <config dir>/standing.md) are
-// appended verbatim to every batch.
+// A failed resume is retried with exponential backoff up to --max-attempts;
+// then the batch is `nacked` and the relay exits nonzero. Delivery is
+// at-least-once: a batch claimed by a relay that crashed is nacked at startup.
 //
 // The resume command is config data (never evaluated): relay.resume, a
 // '|'-separated argv template with __SESSION__ and __BATCH__, and
@@ -49,7 +44,7 @@ func cmdRelay(args []string) int {
 	interval := env("RELAY_INTERVAL", "1")
 	attempts := env("RELAY_MAX_ATTEMPTS", "5")
 	backoff := env("RELAY_BACKOFF", "2")
-	if c := flags("relay.sh", args, map[string]*string{
+	if c := flags("relay", args, map[string]*string{
 		"--interval": &interval, "--max-attempts": &attempts, "--backoff": &backoff,
 	}, map[string]*bool{"--once": &once}); c != 0 {
 		return c
@@ -58,34 +53,27 @@ func cmdRelay(args []string) int {
 	maxAttempts, err2 := strconv.Atoi(attempts)
 	wait0, err3 := strconv.Atoi(backoff)
 	if err1 != nil || err2 != nil || err3 != nil {
-		return fail(2, "relay.sh: --interval, --max-attempts and --backoff must be numbers")
+		return fail(2, "relay: --interval, --max-attempts and --backoff must be numbers")
+	}
+	config := configPath()
+	grace := 30 * time.Second
+	if d, err := time.ParseDuration(cfg.Value(config, "timebox.grace")); err == nil && d >= 0 {
+		grace = d
+	}
+	if err := os.MkdirAll(runPath("batch"), 0o755); err != nil {
+		return fail(1, "relay: %v", err)
 	}
 
-	root := coordRoot()
-	config := configPath()
-	standing := env("COORD_STANDING", filepath.Join(filepath.Dir(config), "standing.md"))
-	// the relay serves the run whose config it was started with
-	logPath := os.Getenv("COORD_EVENTS")
-	if logPath == "" {
-		logPath = filepath.Join(filepath.Dir(config), "events.jsonl")
-	}
-	log := events.Log{Path: logPath}
-	l, q := ledger.Ledger{Log: log}, queue.Queue{Log: log}
-	for _, d := range []string{root, filepath.Join(root, "batch")} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			return fail(1, "relay: %v", err)
-		}
-	}
-	// single relay: hold the lock for the process lifetime
-	lk, ok, err := fsx.TryLock(filepath.Join(root, "relay.lock"))
+	// one relay per run: hold the lock for the process lifetime
+	lk, ok, err := fsx.TryLock(runPath("relay.lock"))
 	if err != nil {
 		return fail(1, "relay: %v", err)
 	}
 	if !ok {
-		return fail(1, "relay: another relay already holds %s; refusing to run two", filepath.Join(root, "relay.lock"))
+		return fail(1, "relay: another relay already holds %s; refusing to run two", runPath("relay.lock"))
 	}
 	defer lk.Close()
-	pidfile := filepath.Join(root, "relay.pid")
+	pidfile := runPath("relay.pid")
 	os.WriteFile(pidfile, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o644)
 	defer os.Remove(pidfile)
 	sigs := make(chan os.Signal, 1)
@@ -96,67 +84,135 @@ func cmdRelay(args []string) int {
 		os.Exit(128 + int(s.(syscall.Signal)))
 	}()
 
-	// reclaim events stranded by a previous relay crash: the lock guarantees
-	// no other consumer exists, so anything in .inflight is ours to requeue.
-	q.Nack()
-
-	reap := func() {
-		for _, line := range l.Live() {
-			f := strings.Fields(line)
-			pid, task := f[1], f[2]
-			if alive(pid) || q.Seen(task) {
-				continue
-			}
-			q.Enqueue(task+".died."+pid, fmt.Sprintf("DIED %s: pid %s exited without finish.sh (log: %s)", task, pid, filepath.Join(root, "log")))
+	// a batch claimed by a relay that crashed is ours to redeliver
+	commit(func(r *model.Run) ([]events.Event, error) {
+		if s := r.InFlight(); len(s) > 0 {
+			return []events.Event{{Type: "nacked", Seqs: s}}, nil
 		}
-	}
+		return nil, nil
+	})
 
-	deliver := func(batch string) bool {
-		wait := wait0
-		for attempt := 1; ; attempt++ {
-			if err := resume(config, "WAKE batch="+batch); err == nil {
-				q.Ack()
-				return true
-			}
-			if attempt >= maxAttempts {
-				q.Nack()
-				fmt.Fprintf(os.Stderr, "relay: resume failed %d times for %s; returned the events to the queue and stopped (fix the resume recipe, then restart the relay)\n", maxAttempts, batch)
-				return false
-			}
-			fmt.Fprintf(os.Stderr, "relay: resume failed (attempt %d/%d), retrying in %ds\n", attempt, maxAttempts, wait)
-			time.Sleep(time.Duration(wait) * time.Second)
-			wait = min(wait*2, 60)
-		}
-	}
-
+	termed := map[string]time.Time{} // slug -> when SIGTERM was sent
 	for {
-		reap()
-		if !q.Pending() {
-			time.Sleep(time.Duration(iv * float64(time.Second)))
-			continue
-		}
-		batch := filepath.Join(root, "batch", fmt.Sprintf("%d.%d.txt", time.Now().UnixNano(), os.Getpid()))
-		n, err := q.PopBatch(batch)
+		reap(termed, grace)
+		batch, seqs, err := claim()
 		if err != nil {
 			return fail(1, "relay: %v", err)
 		}
-		if n == 0 {
+		if batch == "" {
+			time.Sleep(time.Duration(iv * float64(time.Second)))
 			continue
 		}
-		if nonEmpty(standing) {
-			orders, _ := os.ReadFile(standing)
-			f, err := os.OpenFile(batch, os.O_WRONLY|os.O_APPEND, 0o644)
-			if err == nil {
-				fmt.Fprintf(f, "\nSTANDING ORDERS (apply to everything you do):\n%s", orders)
-				f.Close()
-			}
-		}
-		if !deliver(batch) {
+		if !deliver(config, batch, seqs, maxAttempts, wait0) {
 			return 1
 		}
 		if once {
 			return 0
 		}
+	}
+}
+
+// reap reports launches that died or ran past their timebox.
+func reap(termed map[string]time.Time, grace time.Duration) {
+	type live struct {
+		unit, slug string
+		pid        int
+		started    time.Time
+		timebox    int
+	}
+	r := load()
+	var ls []live
+	for _, id := range r.Order {
+		if u := r.Units[id]; u.Owes != "" {
+			ls = append(ls, live{u.ID, u.Owes, u.PID, u.Dispatched, u.TimeboxS})
+		}
+	}
+	for _, l := range r.Research {
+		ls = append(ls, live{"", l.Slug, l.PID, l.Dispatched, l.TimeboxS})
+	}
+	now := time.Now()
+	for _, l := range ls {
+		reason := ""
+		if t, ok := termed[l.slug]; ok {
+			if alive(l.pid) && now.Sub(t) < grace {
+				continue
+			}
+			killGroup(l.pid, syscall.SIGKILL)
+			reason = "timeout"
+		} else if !alive(l.pid) {
+			reason = "exited"
+		} else if l.timebox > 0 && now.Sub(l.started) > time.Duration(l.timebox)*time.Second {
+			killGroup(l.pid, syscall.SIGTERM)
+			termed[l.slug] = now
+			continue
+		}
+		if reason == "" {
+			continue
+		}
+		delete(termed, l.slug)
+		commit(func(r *model.Run) ([]events.Event, error) {
+			add := []events.Event{{Type: "died", Unit: l.unit, Slug: l.slug, PID: l.pid, Reason: reason}}
+			if u := r.Owner(l.slug); u != nil && u.PID == l.pid && u.Deaths[u.Round]+1 >= model.MaxDeaths {
+				add = append(add, events.Event{Type: "blocked", Unit: u.ID, By: "engine",
+					Reason: fmt.Sprintf("died %d times in round %d", model.MaxDeaths, u.Round)})
+			}
+			return add, nil
+		})
+	}
+}
+
+// claim writes every undelivered wake event into a new batch file and
+// records the claim; batch is "" when there is nothing to deliver.
+func claim() (batch string, seqs []int, err error) {
+	_, err = commit(func(r *model.Run) ([]events.Event, error) {
+		wakes := r.Undelivered()
+		if len(wakes) == 0 {
+			return nil, nil
+		}
+		batch = runPath("batch", fmt.Sprintf("%d.txt", time.Now().UnixNano()))
+		var b strings.Builder
+		for _, e := range wakes {
+			fmt.Fprintf(&b, "EVENT %d %s %s %s\n", e.Seq, dash(e.Unit), e.Type, model.Describe(e))
+			seqs = append(seqs, e.Seq)
+		}
+		if p := runPath("standing.md"); nonEmpty(p) {
+			orders, _ := os.ReadFile(p)
+			fmt.Fprintf(&b, "\nSTANDING ORDERS (apply to everything you do):\n%s", orders)
+		}
+		// the batch is written before the claim: a crash in between leaves
+		// the events undelivered, so they are delivered again, never lost
+		if err := os.WriteFile(batch, []byte(b.String()), 0o644); err != nil {
+			return nil, err
+		}
+		return []events.Event{{Type: "claimed", Batch: batch, Seqs: seqs}}, nil
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return batch, seqs, nil
+}
+
+// deliver resumes the coordinator on batch, retrying with backoff; it acks on
+// success and nacks (returning false) when the attempts run out.
+func deliver(config, batch string, seqs []int, maxAttempts, wait int) bool {
+	settle := func(typ string) {
+		commit(func(*model.Run) ([]events.Event, error) {
+			return []events.Event{{Type: typ, Seqs: seqs, Batch: batch}}, nil
+		})
+	}
+	for attempt := 1; ; attempt++ {
+		if err := resume(config, "WAKE batch="+batch); err == nil {
+			settle("acked")
+			return true
+		}
+		if attempt >= maxAttempts {
+			settle("nacked")
+			fmt.Fprintf(os.Stderr, "relay: resume failed %d times for %s; returned the events and stopped (fix the resume recipe, then restart the relay)\n", maxAttempts, batch)
+			return false
+		}
+		fmt.Fprintf(os.Stderr, "relay: resume failed (attempt %d/%d), retrying in %ds\n", attempt, maxAttempts, wait)
+		time.Sleep(time.Duration(wait) * time.Second)
+		wait = min(wait*2, 60)
 	}
 }
 
@@ -178,6 +234,7 @@ func resume(config, pointer string) error {
 		argv[i] = strings.ReplaceAll(argv[i], "__SESSION__", session)
 	}
 	c := exec.Command(argv[0], argv[1:]...)
+	c.Dir = repoRoot()
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return c.Run()
 }
@@ -202,8 +259,5 @@ func sessionID(config string) string {
 	if v := cfg.Value(config, "relay.session"); v != "" {
 		return v
 	}
-	if p := filepath.Join(filepath.Dir(config), "session"); isFile(p) {
-		return readTrim(p)
-	}
-	return readTrim(filepath.Join(cwd(), ".coordinator", "session"))
+	return readTrim(filepath.Join(runDir(), "session"))
 }

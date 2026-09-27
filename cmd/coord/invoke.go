@@ -9,26 +9,6 @@ import (
 	"github.com/zo-ll/coordinator/internal/cfg"
 )
 
-//	invoke <harness> <role> <prompt-file> <cwd> [model]
-//
-// Prints the role's argv NUL-separated (tokens may contain spaces/newlines);
-// runs nothing.
-func cmdInvoke(args []string) int {
-	for i, what := range []string{"harness", "role", "prompt-file", "cwd"} {
-		if arg(args, i) == "" {
-			return fail(1, "invoke: %s is required", what)
-		}
-	}
-	argv, err := buildArgv(args[0], args[1], args[2], args[3], arg(args, 4))
-	if err != nil {
-		return fail(1, "%v", err)
-	}
-	for _, t := range argv {
-		fmt.Print(t, "\x00")
-	}
-	return 0
-}
-
 // buildArgv expands the harness's env.conf exec recipe, a '|'-separated argv
 // template:
 //
@@ -46,7 +26,7 @@ func buildArgv(harness, role, prompt, dir, model string) ([]string, error) {
 		return nil, fmt.Errorf("invoke: no exec recipe for harness '%s' in %s", harness, envConf())
 	}
 	text := strings.TrimRight(string(brief), "\n")
-	agents := env("COORD_AGENTS", filepath.Join(filepath.Dir(scriptsDir()), "agents"))
+	agents := env("COORD_AGENTS", filepath.Join(skillRoot(), "agents"))
 	if pre, err := os.ReadFile(filepath.Join(agents, role+".md")); err == nil {
 		text = strings.TrimRight(string(pre), "\n") + "\n\n" + text
 	}

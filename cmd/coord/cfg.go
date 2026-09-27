@@ -15,7 +15,7 @@ func cmdCfg(args []string) int {
 	switch sub {
 	case "get", "set", "unset":
 		if key == "" {
-			return fail(1, "cfg.sh: key is required")
+			return fail(1, "coord cfg: key is required")
 		}
 	}
 	switch sub {
@@ -27,18 +27,18 @@ func cmdCfg(args []string) int {
 		fmt.Println(v)
 	case "set":
 		if err := cfg.Set(file, key, arg(args, 3)); err != nil {
-			return fail(1, "cfg.sh: %v", err)
+			return fail(1, "coord cfg: %v", err)
 		}
 	case "unset":
 		if err := cfg.Unset(file, key); err != nil {
-			return fail(1, "cfg.sh: %v", err)
+			return fail(1, "coord cfg: %v", err)
 		}
 	case "keys":
 		for _, k := range cfg.Keys(file, key) {
 			fmt.Println(k)
 		}
 	default:
-		return fail(2, "usage: cfg.sh get|set|unset|keys <file> ...")
+		return fail(2, "usage: coord cfg get|set|unset|keys <file> ...")
 	}
 	return 0
 }

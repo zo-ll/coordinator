@@ -15,11 +15,14 @@ import (
 
 // Start a coordinated run: resolve the harness's REAL session id (never an
 // invented one — a resume can only wake a session that actually exists),
-// record it, and start the relay.
+// record it, set up .coordinator/, and start the relay.
 //
 //	start [--harness H] [--session ID] [--no-relay]
 //	  -> SESSION <id> source=<user|env|pi-env|codex-sessions|claude-projects> harness=<h> repo=<repo>
 //	     [RELAY pid=<pid>]
+//
+// .coordinator/.gitignore keeps run state out of git: everything there is
+// ignored except config.conf, standing.md, and playbooks/.
 //
 // Session id resolution: --session, then COORD_SESSION, then the harness's
 // own current session (pi: $PI_SESSION_ID; codex: the newest rollout in
@@ -28,20 +31,20 @@ import (
 func cmdStart(args []string) int {
 	var harness, session string
 	var noRelay bool
-	if c := flags("coord.sh", args, map[string]*string{"--harness": &harness, "--session": &session},
+	if c := flags("start", args, map[string]*string{"--harness": &harness, "--session": &session},
 		map[string]*bool{"--no-relay": &noRelay}); c != 0 {
 		return c
 	}
-	ec, repo, root := envConf(), repoDir(), coordRoot()
+	ec, repo := envConf(), repoRoot()
 	if harness == "" {
 		harness = cfg.Value(ec, "current")
 	}
 	if harness == "" {
-		return fail(1, "coord: no current harness (run detect.sh first)")
+		return fail(1, "coord: no current harness (run coord detect first)")
 	}
 	id, src := resolveSession(harness, session)
 	if id == "" {
-		fmt.Fprintf(os.Stderr, "coord: no resumable session id for harness '%s' — no invented ids.\n", harness)
+		fmt.Fprintf(os.Stderr, "start: no resumable session id for harness '%s' — no invented ids.\n", harness)
 		fmt.Fprintln(os.Stderr, "  pi:       relies on $PI_SESSION_ID")
 		fmt.Fprintln(os.Stderr, "  codex:    scans ${CODEX_HOME:-~/.codex}/sessions for the live rollout")
 		fmt.Fprintln(os.Stderr, "  claude:   scans ${CLAUDE_CONFIG_DIR:-~/.claude}/projects for the live jsonl")
@@ -50,28 +53,21 @@ func cmdStart(args []string) int {
 		return 1
 	}
 
-	cdir := filepath.Join(repo, ".coordinator")
-	if err := os.MkdirAll(cdir, 0o755); err != nil {
-		return fail(1, "coord: %v", err)
+	if err := writeFile(runPath("session"), []byte(id+"\n")); err != nil {
+		return fail(1, "start: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(cdir, "session"), []byte(id+"\n"), 0o644); err != nil {
-		return fail(1, "coord: %v", err)
+	if !isFile(eventsPath()) {
+		writeFile(eventsPath(), nil)
 	}
 	fmt.Printf("SESSION %s source=%s harness=%s repo=%s\n", id, src, harness, repo)
 
-	// repo hygiene: workers use `git add -A`, so keep finish markers out of
-	// the index from the start — the first commit the coordinator authors.
-	// The event log and its lock are runtime state, never committed.
-	gi := filepath.Join(repo, ".gitignore")
-	changed := false
-	for _, pat := range []string{".scratch/", ".coordinator/events.jsonl*"} {
-		if !hasLine(readTrim(gi), pat) {
-			appendLine(gi, pat)
-			changed = true
+	// repo hygiene: run state (log, briefs, logs, batches, worktrees) is never
+	// committed — the first commit the coordinator authors in the run
+	if gi := runPath(".gitignore"); !isFile(gi) {
+		writeFile(gi, []byte(runIgnore))
+		if rel, err := filepath.Rel(repo, gi); err == nil {
+			hygieneCommit(repo, rel, "[coord] ignore run state in .coordinator/")
 		}
-	}
-	if changed {
-		hygieneCommit(repo, ".gitignore", "[coord] ignore .scratch markers and the event log")
 	}
 
 	// claude grants permissions per process and per allowed directory, so
@@ -81,7 +77,7 @@ func cmdStart(args []string) int {
 	cs := filepath.Join(repo, ".claude", "settings.local.json")
 	if b, err := os.ReadFile(cs); err == nil {
 		if !strings.Contains(string(b), "bypassPermissions") {
-			fmt.Fprintf(os.Stderr, "coord: claude settings exist without bypassPermissions: %s (merge policy requires full worker perms)\n", cs)
+			fmt.Fprintf(os.Stderr, "start: claude settings exist without bypassPermissions: %s (merge policy requires full worker perms)\n", cs)
 		}
 	} else if _, err := os.Lstat(cs); os.IsNotExist(err) {
 		os.MkdirAll(filepath.Dir(cs), 0o755)
@@ -92,39 +88,43 @@ func cmdStart(args []string) int {
 	if noRelay {
 		return 0
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return fail(1, "coord: %v", err)
-	}
 	// pin the resume recipe so the relay never depends on env.conf `current`,
 	// which may be unresolved in the coordinator's shell; config is explicit.
-	cfgf := filepath.Join(cdir, "config.conf")
+	cfgf := configPath()
 	if !isFile(cfgf) {
 		os.WriteFile(cfgf, nil, 0o644)
 	}
 	if rec := cfg.Value(ec, "harness."+harness+".resume"); rec != "" {
 		cfg.Set(cfgf, "relay.resume", rec)
 	}
-	pid, err := startRelay(root, cfgf, id)
+	pid, err := startRelay(cfgf, id)
 	if err != nil {
-		return fail(1, "coord: cannot start relay: %v", err)
+		return fail(1, "start: cannot start relay: %v", err)
 	}
-	os.WriteFile(filepath.Join(root, "relay.pid"), []byte(fmt.Sprintf("%d\n", pid)), 0o644)
+	os.WriteFile(runPath("relay.pid"), []byte(fmt.Sprintf("%d\n", pid)), 0o644)
 	fmt.Printf("RELAY pid=%d\n", pid)
 	return 0
 }
 
-func startRelay(root, config, session string) (int, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return 0, err
-	}
-	logf, err := os.OpenFile(filepath.Join(root, "relay.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+const runIgnore = `# run state of the coordinator: only the committed choices are kept
+*
+!.gitignore
+!config.conf
+!standing.md
+!playbooks/
+!playbooks/*.md
+`
+
+func startRelay(config, session string) (int, error) {
+	os.MkdirAll(runPath("log"), 0o755)
+	logf, err := os.OpenFile(runPath("log", "relay.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		return 0, err
 	}
 	defer logf.Close()
-	c := exec.Command(exe, "relay")
-	c.Env = append(os.Environ(), "COORD_CONFIG="+config, "COORD_SESSION="+session, "COORD_SCRIPTS="+scriptsDir())
+	c := exec.Command(self(), "relay")
+	c.Dir = repoRoot()
+	c.Env = append(os.Environ(), "COORD_EVENTS="+eventsPath(), "COORD_CONFIG="+config, "COORD_SESSION="+session)
 	c.Stdout, c.Stderr = logf, logf
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := c.Start(); err != nil {
@@ -183,18 +183,4 @@ func newest(dir string, match func(string) bool) string {
 		return nil
 	})
 	return best
-}
-
-// appendLine appends line, first terminating an unterminated last line.
-func appendLine(path, line string) {
-	b, _ := os.ReadFile(path)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	if len(b) > 0 && b[len(b)-1] != '\n' {
-		f.WriteString("\n")
-	}
-	f.WriteString(line + "\n")
 }

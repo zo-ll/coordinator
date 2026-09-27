@@ -1,6 +1,5 @@
-// Command coord is the coordinator engine. Each subcommand implements one v1
-// script contract (scripts/<verb>.sh is a shim that execs `coord <verb>`):
-// the same arguments, the same one-line output, the same files.
+// Command coord is the coordinator engine: one binary, one subcommand per
+// protocol step, one line of output per result. See SPEC-v2.md.
 package main
 
 import (
@@ -12,29 +11,34 @@ import (
 	"sort"
 	"strings"
 	"syscall"
-
-	"github.com/zo-ll/coordinator/internal/events"
 )
 
 var commands = map[string]func([]string) int{
 	"apply":    cmdApply,
+	"approve":  cmdDecide("approved"),
+	"block":    cmdDecide("blocked"),
 	"cfg":      cmdCfg,
 	"detect":   cmdDetect,
+	"dispatch": cmdDispatch,
+	"done":     cmdDone,
+	"drop":     cmdDecide("dropped"),
 	"finish":   cmdFinish,
-	"hygiene":  cmdHygiene,
-	"invoke":   cmdInvoke,
+	"log":      cmdLog,
 	"merge":    cmdMerge,
+	"msg":      cmdDecide("msg"),
 	"plan":     cmdPlan,
-	"queue":    cmdQueue,
+	"reject":   cmdDecide("rejected"),
 	"relay":    cmdRelay,
-	"spawn":    cmdSpawn,
+	"render":   cmdRender,
+	"reopen":   cmdDecide("reopened"),
+	"research": cmdResearch,
 	"start":    cmdStart,
-	"state":    cmdState,
 	"status":   cmdStatus,
-	"worktree": cmdWorktree,
+	"unit":     cmdUnit,
 }
 
 func main() {
+	rebuildIfStale()
 	if len(os.Args) < 2 {
 		os.Exit(fail(2, "usage: coord <%s> ...", verbs()))
 	}
@@ -68,89 +72,41 @@ func env(name, def string) string {
 	return def
 }
 
-func cwd() string {
-	d, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return d
+// flags parses "--name value", repeatable "--name value" (multi), and
+// "--name" (bool); anything else is an unknown-arg error.
+type flagSet struct {
+	vals  map[string]*string
+	multi map[string]*[]string
+	bools map[string]*bool
 }
 
-func coordRoot() string { return env("COORD_ROOT", "/tmp/coordinator") }
-func coordHome() string { return env("COORD_HOME", filepath.Join(os.Getenv("HOME"), ".coordinator")) }
-func envConf() string   { return env("COORD_ENV_CONF", filepath.Join(coordHome(), "env.conf")) }
-func configPath() string {
-	return env("COORD_CONFIG", filepath.Join(cwd(), ".coordinator", "config.conf"))
-}
-
-// eventsPath is the event log: $COORD_EVENTS, else the nearest
-// .coordinator/events.jsonl at or above the working directory (a worktree
-// under <repo>/.coordinator/worktrees finds its repo's log), else
-// ./.coordinator/events.jsonl.
-func eventsPath() string {
-	if p := existingEventsPath(); p != "" {
-		return p
-	}
-	return filepath.Join(cwd(), ".coordinator", "events.jsonl")
-}
-
-// existingEventsPath is eventsPath without the fallback: "" when no log is
-// named or found.
-func existingEventsPath() string {
-	if p := os.Getenv("COORD_EVENTS"); p != "" {
-		if abs, err := filepath.Abs(p); err == nil {
-			return abs
-		}
-		return p
-	}
-	for d := cwd(); ; d = filepath.Dir(d) {
-		if p := filepath.Join(d, ".coordinator", "events.jsonl"); isFile(p) {
-			return p
-		}
-		if filepath.Dir(d) == d {
-			return ""
-		}
-	}
-}
-
-func eventLog() events.Log { return events.Log{Path: eventsPath()} }
-func repoDir() string      { return env("COORD_REPO", cwd()) }
-
-// scriptsDir is where the shims live: set by the shim, else next to bin/.
-func scriptsDir() string {
-	if d := os.Getenv("COORD_SCRIPTS"); d != "" {
-		return d
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return "scripts"
-	}
-	if r, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = r
-	}
-	return filepath.Join(filepath.Dir(filepath.Dir(exe)), "scripts")
-}
-
-// flags parses "--name value" and "--name" (bool) arguments; anything else is
-// an unknown-arg error in the script's own wording.
-func flags(prog string, args []string, vals map[string]*string, bools map[string]*bool) int {
+func (fs flagSet) parse(prog string, args []string) int {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if b, ok := bools[a]; ok {
+		if b, ok := fs.bools[a]; ok {
 			*b = true
 			continue
 		}
-		if v, ok := vals[a]; ok {
-			if i+1 >= len(args) {
-				return fail(2, "%s: %s needs a value", prog, a)
-			}
-			*v = args[i+1]
-			i++
-			continue
+		v, one := fs.vals[a]
+		m, many := fs.multi[a]
+		if !one && !many {
+			return fail(2, "%s: unknown arg: %s", prog, a)
 		}
-		return fail(2, "%s: unknown arg: %s", prog, a)
+		if i+1 >= len(args) {
+			return fail(2, "%s: %s needs a value", prog, a)
+		}
+		if one {
+			*v = args[i+1]
+		} else {
+			*m = append(*m, args[i+1])
+		}
+		i++
 	}
 	return 0
+}
+
+func flags(prog string, args []string, vals map[string]*string, bools map[string]*bool) int {
+	return flagSet{vals: vals, bools: bools}.parse(prog, args)
 }
 
 func arg(args []string, i int) string {
@@ -162,14 +118,17 @@ func arg(args []string, i int) string {
 
 // git runs git and returns stdout without trailing newlines; stderr is dropped.
 func git(args ...string) (string, error) {
-	out, err := gitRaw(args...)
+	out, err := gitRaw(nil, args...)
 	return strings.TrimRight(string(out), "\n"), err
 }
 
-func gitRaw(args ...string) ([]byte, error) {
+func gitRaw(extraEnv []string, args ...string) ([]byte, error) {
 	var out bytes.Buffer
 	c := exec.Command("git", args...)
 	c.Stdout = &out
+	if extraEnv != nil {
+		c.Env = append(os.Environ(), extraEnv...)
+	}
 	err := c.Run()
 	return out.Bytes(), err
 }
@@ -181,15 +140,17 @@ func gitLoud(args ...string) error {
 	return c.Run()
 }
 
-func alive(pid string) bool {
-	if pid == "" || pid == "-" {
-		return false
+func alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
+
+// killGroup signals a launch's process group (launches run under setsid),
+// falling back to the process itself.
+func killGroup(pid int, sig syscall.Signal) {
+	if pid <= 0 {
+		return
 	}
-	var n int
-	if _, err := fmt.Sscanf(pid, "%d", &n); err != nil || n <= 0 {
-		return false
+	if syscall.Kill(-pid, sig) != nil {
+		syscall.Kill(pid, sig)
 	}
-	return syscall.Kill(n, 0) == nil
 }
 
 func isFile(p string) bool {
@@ -208,4 +169,52 @@ func readTrim(p string) string {
 		return ""
 	}
 	return strings.TrimRight(string(b), "\n")
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func bit(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+func hasLine(s, want string) bool {
+	for _, l := range strings.Split(s, "\n") {
+		if l == want {
+			return true
+		}
+	}
+	return false
+}
+
+// identity is the repo user's git identity, with the coordinator's fallback.
+func identity(repo string) (email, name string) {
+	email, err := git("-C", repo, "config", "user.email")
+	if err != nil || email == "" {
+		email = "coord@local"
+	}
+	name, err = git("-C", repo, "config", "user.name")
+	if err != nil || name == "" {
+		name = "coordinator"
+	}
+	return email, name
+}
+
+// self is this binary's resolved path, for finish contracts and the relay.
+func self() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "coord"
+	}
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		return r
+	}
+	return exe
 }

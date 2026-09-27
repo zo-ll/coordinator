@@ -262,14 +262,14 @@ func dashNone(s string) string {
 func cmdApply(args []string) int {
 	var accept bool
 	answers, config := "", configPath()
-	if c := flags("apply.sh", args, map[string]*string{"--answers": &answers, "--config": &config},
+	if c := flags("apply", args, map[string]*string{"--answers": &answers, "--config": &config},
 		map[string]*bool{"--accept": &accept}); c != 0 {
 		return c
 	}
 	proposal := env("COORD_PROPOSAL", filepath.Join(coordHome(), "proposal.conf"))
 	data, err := os.ReadFile(proposal)
 	if err != nil {
-		return fail(1, "FAIL proposal: run plan.sh first")
+		return fail(1, "FAIL proposal: run coord plan first")
 	}
 	tmp, err := os.CreateTemp(coordHome(), "config.")
 	if err != nil {

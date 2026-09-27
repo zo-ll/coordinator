@@ -1,5 +1,5 @@
 // Package events is the append-only event log, the single source of truth.
-// The queue and the slice ledger are projections of it.
+// Unit state and delivery state are projections of it (package model).
 //
 // One JSON object per line, seq 1, 2, … with no gaps. Every append is one
 // transaction under an exclusive lock: replay, decide, allocate seq, write,
@@ -18,32 +18,62 @@ import (
 	"github.com/zo-ll/coordinator/internal/fsx"
 )
 
-// Event is one log entry; Type says which fields are set.
+// Event is one log entry; Type says which fields are set (see SPEC-v2).
 type Event struct {
 	Seq  int    `json:"seq"`
 	TS   string `json:"ts"`
 	Type string `json:"type"`
+	Unit string `json:"unit,omitempty"`
 
-	// queue: enqueued (Slug, Line); claimed, acked, nacked (Slugs; claimed also Batch)
-	Slug  string   `json:"slug,omitempty"`
-	Line  string   `json:"line,omitempty"`
-	Slugs []string `json:"slugs,omitempty"`
-	Batch string   `json:"batch,omitempty"`
+	// unit_added
+	Kind string   `json:"kind,omitempty"`
+	Goal string   `json:"goal,omitempty"`
+	Deps []string `json:"deps,omitempty"`
+	Risk string   `json:"risk,omitempty"`
 
-	// ledger: slice_added, readied (IDs), dispatched, review, verdict,
-	// merged, blocked, dropped
-	Unit     string   `json:"unit,omitempty"`
-	IDs      []string `json:"ids,omitempty"`
-	Goal     string   `json:"goal,omitempty"`
-	Blockers string   `json:"blockers,omitempty"`
-	PID      string   `json:"pid,omitempty"`
-	Worktree string   `json:"worktree,omitempty"`
-	Branch   string   `json:"branch,omitempty"`
-	Task     string   `json:"task,omitempty"`
-	Round    string   `json:"round,omitempty"`
-	Verdict  string   `json:"verdict,omitempty"`
-	Head     string   `json:"head,omitempty"`
-	SHA      string   `json:"sha,omitempty"`
+	// dispatched, finished, died
+	Role     string `json:"role,omitempty"`
+	Round    int    `json:"round,omitempty"`
+	Slug     string `json:"slug,omitempty"`
+	PID      int    `json:"pid,omitempty"`
+	Worktree string `json:"worktree,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	Base     string `json:"base,omitempty"`
+	Brief    string `json:"brief,omitempty"`
+	Report   string `json:"report,omitempty"`
+	Harness  string `json:"harness,omitempty"`
+	Model    string `json:"model,omitempty"`
+	TimeboxS int    `json:"timebox_s,omitempty"`
+	Log      string `json:"log,omitempty"`
+
+	// finished
+	Result   string    `json:"result,omitempty"`
+	State    string    `json:"state,omitempty"`
+	Evidence *Evidence `json:"evidence,omitempty"`
+	Summary  string    `json:"summary,omitempty"`
+
+	// converted, died, blocked, reopened, dropped, approved, rejected, msg
+	From   string `json:"from,omitempty"`
+	To     string `json:"to,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	By     string `json:"by,omitempty"`
+	Text   string `json:"text,omitempty"`
+
+	// verify_failed, merged
+	Command string `json:"command,omitempty"`
+	Exit    int    `json:"exit,omitempty"`
+	SHA     string `json:"sha,omitempty"`
+
+	// claimed, acked, nacked (delivery of wake events)
+	Batch string `json:"batch,omitempty"`
+	Seqs  []int  `json:"seqs,omitempty"`
+}
+
+// Evidence is what a critic's pass is backed by.
+type Evidence struct {
+	Level string   `json:"level"`
+	Ran   []string `json:"ran,omitempty"`
+	Flags []string `json:"flags,omitempty"`
 }
 
 type Log struct{ Path string }
@@ -72,8 +102,8 @@ func parse(b []byte) []Event {
 }
 
 // Append runs decide over the current log under the lock and appends what
-// it returns (possibly nothing), assigning seq and ts. decide's error aborts
-// the transaction without writing.
+// it returns (possibly nothing), assigning seq and ts where decide left them
+// zero. decide's error aborts the transaction without writing.
 func (l Log) Append(decide func(log []Event) ([]Event, error)) ([]Event, error) {
 	if err := os.MkdirAll(filepath.Dir(l.Path), 0o755); err != nil {
 		return nil, err
@@ -115,7 +145,12 @@ func (l Log) Append(decide func(log []Event) ([]Event, error)) ([]Event, error) 
 	var out bytes.Buffer
 	for i := range add {
 		seq++
-		add[i].Seq, add[i].TS = seq, ts
+		if add[i].Seq == 0 {
+			add[i].Seq = seq
+		}
+		if add[i].TS == "" {
+			add[i].TS = ts
+		}
 		line, err := json.Marshal(add[i])
 		if err != nil {
 			return nil, err

@@ -1,6 +1,7 @@
-# coordinator v2 (draft)
+# coordinator v2
 
-Status: draft. v1 ([SPEC.md](SPEC.md)) is what the code implements today.
+Status: implemented; the migration from v1 ([SPEC.md](SPEC.md)) is complete.
+Decisions made during implementation are recorded under Decisions.
 
 ## Problem Statement
 
@@ -79,23 +80,29 @@ transitions, timeouts, and retry caps are code.
 ### Runtime and install
 
 One static Go binary, `coord`, with subcommands. Standard library only (no
-cgo). `bin/install.sh` builds it when `go` is on `PATH`, otherwise downloads the
-release binary for the platform; the repo is still symlinked into each
-harness's skill dir, so SKILL.md, playbooks, and agents stay live on `git pull`.
+cgo). `bin/install.sh` builds it when `go` is on `PATH` (release binaries for
+machines without Go are not built yet); the repo is still symlinked into each
+harness's skill dir, so SKILL.md, playbooks, and agents stay live on `git pull`,
+and `bin/coord` rebuilds itself when a Go source is newer than it.
 Linux and WSL only, as in v1.
 
 ### Storage
 
+Everything a run creates lives in `<repo>/.coordinator/`:
+
 | Path | Contents | Writer |
 |---|---|---|
-| `<repo>/.coordinator/events.jsonl` | append-only event log, the source of truth, including delivery state | `coord` under `events.jsonl.lock` |
-| `<repo>/.coordinator/config.conf` | repo choices (v1 format, committed) | `coord apply` |
-| `<repo>/.coordinator/standing.md` | standing orders (committed) | the coordinator / user |
-| `<repo>/.coordinator/playbooks/*.md` | repo playbook overrides (committed) | the user |
-| `<repo>/.coordinator/session` | coordinator session id | `coord start` |
-| `$COORD_ROOT/log/`, `$COORD_ROOT/batch/` | role logs, batch files | `coord` |
-
-`events.jsonl` and `session` are runtime state and gitignored.
+| `events.jsonl` | append-only event log, the source of truth, including delivery state | `coord` under `events.jsonl.lock` |
+| `config.conf` | repo choices (v1 format, committed) | `coord apply` |
+| `standing.md` | standing orders (committed) | the coordinator / user |
+| `playbooks/*.md` | repo playbook overrides (committed) | the user |
+| `.gitignore` | ignores everything here except the three above | `coord start` |
+| `session` | coordinator session id | `coord start` |
+| `briefs/<slug>.md`, `briefs/<slug>.brief.md` | each launch's full prompt; each worker's raw brief | `coord dispatch` |
+| `worktrees/<id>/` | the unit's worktree, branch `coord/<id>` | `coord dispatch` |
+| `log/<slug>.log`, `log/<id>.verify.log`, `log/relay.log` | launch output, merge VERIFY output, relay output | `coord` |
+| `batch/`, `research/` | batch files, researcher reports | relay, researchers |
+| `relay.lock`, `relay.pid` | one relay per run | `coord relay` |
 
 The log is found as `$COORD_EVENTS`, else the nearest
 `.coordinator/events.jsonl` at or above the working directory, else
@@ -117,9 +124,10 @@ Each line is one JSON object: `seq` (1, 2, …, no gaps), `ts` (UTC), `unit`
 | `finished` | `slug`, `role`, `result`, `state`, `evidence`, `summary` | `coord finish` | yes |
 | `converted` | `slug`, `from`, `to`, `reason` | engine (evidence below floor) | yes |
 | `died` | `slug`, `pid`, `reason` (`exited` \| `timeout`) | relay | yes |
-| `approved` / `rejected` | `note` | `coord approve\|reject` (user) | yes |
+| `approved` / `rejected` | `text` (`by: engine` for a merge conflict) | `coord approve\|reject` (user), `coord merge` (engine) | yes |
 | `msg` | `text` | `coord msg` (user) | yes |
-| `verify_failed` | `command`, `exit`, `log` | `coord merge` | yes |
+| `verify_failed` | `command`, `exit`, `log`, `reason` | `coord merge` | yes |
+| `claimed` / `acked` / `nacked` | `seqs`, `batch` | the relay (delivery of wake events) | no |
 | `merged` | `sha` | `coord merge` | no |
 | `blocked` | `reason` | `coord block`, or engine (retry cap) | yes if by engine |
 | `reopened` / `dropped` | `reason` | `coord reopen\|drop` | no |
@@ -153,7 +161,8 @@ States: `todo`, `working`, `built`, `reviewing`, `passed`, `handback`,
 | `working`, `reviewing` | `died` | `stalled` | remembers role and round |
 | `stalled` | `dispatched` same role, same round | `working` / `reviewing` | deaths this round < 2 |
 | `stalled` | second `died` in a round | `blocked` | engine appends `blocked` |
-| `passed` | `approved` | `approved` | `autonomy=approve-merge` |
+| `passed` | `approved` | `approved` | |
+| `passed`, `approved` | `rejected` | `handback` | by the user, or by the engine on a merge conflict |
 | `passed` (auto-merge) or `approved` | `verify_failed` | `handback` | |
 | `passed` (auto-merge) or `approved` | `merged` | `merged` | worktree state hash = recorded `state`; every VERIFY command passed |
 | any non-terminal | `blocked` | `blocked` | |
@@ -218,7 +227,7 @@ brief — `GOAL`, `SCOPE`, `ACCEPTANCE`, `VERIFY`, and `REPRO` when present —
 plus the playbook's `## critic` section and the instruction to review the
 worktree against the unit's base commit. `CONTEXT` and any other coordinator
 prose are left out: the critic sees the criteria and the code, never the
-coordinator's framing. Stored at `$COORD_ROOT/briefs/<slug>.md` for the log.
+coordinator's framing. Stored at `.coordinator/briefs/<slug>.md` for the log.
 
 ### Evidence
 
@@ -232,9 +241,11 @@ Levels, ordered: `none < typecheck < tests < live`.
 A critic finishes with `--evidence <level>`, one `--ran "<command>"` per
 command it ran, and optional `--flag <name>` for each `evidence.require` item
 it proved (`red-green`: a test fails at the base commit and passes at the
-reviewed state). `coord finish` computes the state hash itself in the worktree
-(`git diff HEAD` over tracked and untracked files outside `.scratch/`, SHA-256)
-and records it; the critic no longer passes `--head`.
+reviewed state). `coord finish` computes the state hash itself in the unit's
+worktree and records it; the critic no longer passes `--head`. The hash is the
+SHA-256 of `git diff --cached --binary HEAD` over a throwaway index holding the
+whole working tree (tracked changes and untracked, non-ignored files, outside
+`.scratch/`), so it does not depend on what the worker staged.
 
 A `pass` is accepted only if the level is at or above the playbook floor, at
 least one `--ran` is given (unless the floor is `none`), and every
@@ -252,17 +263,20 @@ itself (see Merge). A pass whose tests do not actually pass never merges.
 `coord merge <id>`, in order, refusing at the first failure:
 
 1. Recorded user approval (or `autonomy=auto-merge`).
-2. Worktree state hash = the recorded `state`.
+2. The repo is on the base branch, and the worktree state hash = the recorded `state`.
 3. Each `$ ` command from the brief's `VERIFY`, in order, run with `bash -c` in
-   the worktree, output to `$COORD_ROOT/log/<id>.verify.log`, each bounded by
+   the worktree, output to `.coordinator/log/<id>.verify.log`, each bounded by
    `verify.timeout` (config, default 10m). A nonzero exit or timeout appends
    `verify_failed` (the unit goes to `handback`) and prints
    `REFUSED <id> merge: verify failed: <command> (exit <n>)`.
 4. State hash recomputed: a VERIFY command that changed the tracked or
    untracked non-ignored files refuses the merge (`verify modified the
-   worktree`), since the merged state must be the reviewed one.
-5. Commit with the user's identity, merge in dependency order, push if
-   `origin` exists, append `merged`.
+   worktree`, recorded as `verify_failed`), since the merged state must be the
+   reviewed one.
+5. Stage the reviewed state and commit it with the user's identity, merge
+   `coord/<id>` with `--no-ff`, push if `origin` exists, append `merged`. A
+   conflicting merge is aborted, the commit undone, and `rejected` (by engine)
+   appended, so the unit returns to `handback` for a correction round.
 
 This is the one place the engine executes brief content. The commands are ones
 the coordinator wrote and the worker has already run with full permissions in
@@ -276,8 +290,10 @@ the same worktree; config values are still never executed.
 1. **Liveness.** For each `working`/`reviewing` unit whose pid is gone and whose
    owed slug has no `finished` event, append `died reason=exited`.
 2. **Timebox.** For each such unit past `dispatched.ts + timebox_s`, send
-   SIGTERM to its process group (launches run under `setsid`), wait 30s, send
-   SIGKILL, append `died reason=timeout`.
+   SIGTERM to its process group (launches run under `setsid`); once it exits,
+   or after `timebox.grace` (config, default 30s) with SIGKILL, append `died
+   reason=timeout`. Waiting never blocks the tick. A second death in one round
+   also appends `blocked` (by engine).
 3. **Delivery.** If any wake event is undelivered, write them in order to a
    batch file (`EVENT <seq> <unit> <type> <one line>`, then the standing
    orders) and append `claimed {batch, seqs}`; resume the coordinator with
@@ -369,10 +385,10 @@ Callers first, then delete the old path.
    `enqueued`/`claimed`/`acked`/`nacked` events; tests that read queue files
    now assert through `queue depth` and batch contents; `ENQUEUED` prints
    `seq=<n>` instead of a file name.)
-3. **v2 model.** Add kinds, playbooks, evidence, engine-computed rounds and
+3. **v2 model.** *(done)* Add kinds, playbooks, evidence, engine-computed rounds and
    slugs, the timebox scheduler, and the v2 CLI. Update SKILL.md and the role
    preambles. Port the tests to the v2 CLI.
-4. **Delete v1.** Remove the shims and v1-only tests once SKILL.md and all
+4. **Delete v1.** *(done)* Remove the shims and v1-only tests once SKILL.md and all
    recipes call `coord` directly.
 
 A run in progress is not migrated across phases; finish it on the version that
@@ -399,6 +415,23 @@ Settled on review of the draft (2026-09-27):
 3. **Every unit gets a critic.** No self-review path, including `chore`; the
    critic stays the only content reviewer.
 4. **A worker's `partial` goes to `handback`**, like any other correction round.
+
+Made during implementation (2026-09-27):
+
+5. **One directory per run.** All run state lives in `<repo>/.coordinator/`
+   (see Storage); `$COORD_ROOT` is gone, so there is one relay per repo, not
+   per machine.
+6. **The state hash ignores staging** (see Evidence); workers no longer need
+   to stage, and merge stages the reviewed state itself.
+7. **Every refusal has a way forward.** `rejected` (user) and a merge conflict
+   (`rejected` by engine) return the unit to `handback`, and so does a VERIFY
+   that modifies the worktree (`verify_failed`).
+8. **Researchers are unit-less launches** (`coord research`): slug
+   `research.<n>`, a report path under `.coordinator/research/`, and a
+   `finished` event that wakes the coordinator.
+9. **A launch the state machine refuses to record is killed.** `dispatch`
+   launches, then commits the `dispatched` event; if a concurrent change makes
+   it illegal, the new process group gets SIGTERM.
 
 ## Open Questions
 

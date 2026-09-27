@@ -4,9 +4,9 @@
 #   bin/install.sh              symlink this repo as <harness>/coordinator
 #   bin/install.sh --uninstall  remove those symlinks
 #
-# The repo root is the skill (SKILL.md + scripts/), so it is symlinked as a
-# directory: edits and `git pull` stay live (a shim rebuilds bin/coord when a
-# Go source is newer than it and go is on PATH). Safe and idempotent. Override the
+# The repo root is the skill (SKILL.md, bin/coord, playbooks/, agents/), so it
+# is symlinked as a directory: edits and `git pull` stay live (bin/coord
+# rebuilds itself when a Go source is newer than it and go is on PATH). Safe and idempotent. Override the
 # target list with COORD_SKILL_DIRS (colon-separated) for testing.
 set -euo pipefail
 
@@ -39,13 +39,13 @@ case "${1:-}" in
   *) echo "usage: install.sh [--uninstall]" >&2; exit 2 ;;
 esac
 
-# the scripts are shims over bin/coord: build it (build output on stderr so
-# stdout stays one line). Without go, an existing binary is kept.
+# build bin/coord (build output on stderr so stdout stays one line). Without
+# go, an existing binary is kept.
 if [ "$mode" = install ]; then
   if command -v go >/dev/null 2>&1; then
     (cd "$REPO" && go build -o bin/coord ./cmd/coord) >&2 || { echo "install: go build failed" >&2; exit 1; }
   elif [ ! -x "$REPO/bin/coord" ]; then
-    echo "install: go is not on PATH and bin/coord is missing; the scripts will not run until it is built" >&2
+    echo "install: go is not on PATH and bin/coord is missing; the skill will not run until it is built" >&2
   fi
 fi
 

@@ -1,80 +1,131 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
-	"time"
 
 	"github.com/zo-ll/coordinator/internal/events"
-	"github.com/zo-ll/coordinator/internal/queue"
+	"github.com/zo-ll/coordinator/internal/model"
+	"github.com/zo-ll/coordinator/internal/playbook"
 )
 
-var (
-	slugRe  = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-	roundRe = regexp.MustCompile(`\.r[0-9]`)
-)
-
-// Record completion: write the recovery marker, then enqueue the ping.
+// Record a launch's completion.
 //
-//	finish --event <slug> --role <worker|critic|researcher>
-//	       --result <done|checkpoint|correction|pass|handback>
-//	       --head <sha|-> --summary "one line"
+//	finish --result <done|partial|pass|handback> [--evidence <level>]
+//	       [--ran "<command>"]… [--flag <name>]… --summary "<one line>" [--slug <s>]
+//	  -> FINISHED <slug> -> <state> | DUP <slug>
 //
-// Marker: $COORD_MARKERS/<event>.done (default <cwd>/.scratch/status),
-// written BEFORE the ping is enqueued. The ping is an `enqueued` event in the
-// run's log ($COORD_EVENTS, or the nearest .coordinator/events.jsonl above
-// the working directory); finish never creates a log it was not pointed at.
+// The slug is the one the launch owes: --slug, else $COORD_OWES (set at
+// dispatch). The log is $COORD_EVENTS or the nearest .coordinator/events.jsonl
+// above the working directory; finish never creates one.
+//
+// A critic's pass is checked against the unit's playbook: the evidence level
+// must reach the floor, at least one --ran is required unless the floor is
+// none, and every required flag must be present. Otherwise the pass is
+// recorded and converted to a handback, with the reason. The reviewed-state
+// hash is computed here, in the unit's worktree.
 func cmdFinish(args []string) int {
-	var event, role, result, summary string
-	head := "-"
-	if c := flags("finish.sh", args, map[string]*string{
-		"--event": &event, "--role": &role, "--result": &result, "--head": &head, "--summary": &summary,
-	}, nil); c != 0 {
+	var result, level, summary, slug string
+	var ran, flagsSet []string
+	fs := flagSet{
+		vals:  map[string]*string{"--result": &result, "--evidence": &level, "--summary": &summary, "--slug": &slug},
+		multi: map[string]*[]string{"--ran": &ran, "--flag": &flagsSet},
+	}
+	if c := fs.parse("finish", args); c != 0 {
 		return c
 	}
-	if event == "" || role == "" || result == "" {
-		return fail(2, "finish.sh: --event, --role and --result are required")
+	if slug == "" {
+		slug = os.Getenv("COORD_OWES")
 	}
-	if !slugRe.MatchString(event) {
-		return fail(2, "finish.sh: invalid --event slug '%s' (use [A-Za-z0-9._-]+)", event)
+	if slug == "" || result == "" {
+		return fail(2, "finish: --result and the owed slug (--slug or COORD_OWES) are required")
 	}
-
-	// never start a log nobody reads: a finish must name or find its run's log
-	logPath := existingEventsPath()
-	if logPath == "" {
-		return fail(1, "finish.sh: no event log (set COORD_EVENTS, or run inside the repo or its worktrees)")
+	if existingEventsPath() == "" {
+		return fail(1, "finish: no event log (set COORD_EVENTS, or run inside the repo or its worktrees)")
 	}
 
-	// foo -> foo/r1; foo.critic -> foo/r1; foo.r2 -> foo/r2; foo.r2.critic -> foo/r2
-	base := strings.TrimSuffix(event, ".critic")
-	task, round := base, "1"
-	if roundRe.MatchString(base) {
-		round = base[strings.LastIndex(base, ".r")+2:]
-		task = base[:strings.LastIndex(base, ".")]
+	r := load()
+	if r.Finished[slug] {
+		fmt.Printf("DUP %s\n", slug)
+		return 0
+	}
+	fin := events.Event{Type: "finished", Slug: slug, Result: result, Summary: summary}
+	var conv *events.Event
+	if l := r.Research[slug]; l != nil {
+		fin.Role, fin.Report = "researcher", l.Report
+	} else {
+		u := r.Owner(slug)
+		if u == nil {
+			return refuse("", "finished", "slug %q is not owed by any live launch", slug)
+		}
+		fin.Unit, fin.Role = u.ID, u.Role
+		if u.Role == "critic" && result == "pass" {
+			pb, err := playbook.Load(u.Kind, playbookDirs()...)
+			if err != nil {
+				return refuse(u.ID, "finished", "%v", err)
+			}
+			if level == "" {
+				level = "none"
+			}
+			if playbook.Rank(level) < 0 {
+				return fail(2, "finish: --evidence %q is not one of %s", level, strings.Join(playbook.Levels, ","))
+			}
+			state, err := stateHash(u.Worktree)
+			if err != nil {
+				return fail(1, "finish: cannot hash the reviewed state in %s: %v", u.Worktree, err)
+			}
+			fin.State = state
+			fin.Evidence = &events.Evidence{Level: level, Ran: ran, Flags: flagsSet}
+			if reason := shortfall(pb, fin.Evidence); reason != "" {
+				conv = &events.Event{Type: "converted", Unit: u.ID, Slug: slug, From: "pass", To: "handback", Reason: reason}
+			}
+		}
 	}
 
-	markers := env("COORD_MARKERS", filepath.Join(cwd(), ".scratch", "status"))
-	if err := os.MkdirAll(markers, 0o755); err != nil {
-		return fail(1, "finish.sh: %v", err)
+	_, err := commit(func(*model.Run) ([]events.Event, error) {
+		add := []events.Event{fin}
+		if conv != nil {
+			add = append(add, *conv)
+		}
+		return add, nil
+	})
+	if errors.Is(err, model.ErrDup) {
+		fmt.Printf("DUP %s\n", slug)
+		return 0
 	}
-	ts := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	marker := fmt.Sprintf("done TS=%s TASK=%s ROUND=%s ROLE=%s HEAD=%s RESULT=%s SUMMARY=%s\n",
-		ts, task, round, role, head, result, summary)
-	if err := os.WriteFile(filepath.Join(markers, event+".done"), []byte(marker), 0o644); err != nil {
-		return fail(1, "finish.sh: %v", err)
+	if err != nil {
+		return refused(err)
 	}
-
-	line := fmt.Sprintf("DONE %s: %s — %s", task, result, summary)
-	if role == "critic" {
-		line = fmt.Sprintf("VERDICT %s: %s @ %s — %s", task, result, head, summary)
+	switch {
+	case fin.Role == "researcher":
+		fmt.Printf("FINISHED %s report=%s\n", slug, fin.Report)
+	case conv != nil:
+		fmt.Printf("FINISHED %s -> handback (converted: %s)\n", slug, conv.Reason)
+	default:
+		fmt.Printf("FINISHED %s -> %s\n", slug, load().Units[fin.Unit].State)
 	}
-	q := queue.Queue{Log: events.Log{Path: logPath}}
-	if _, _, err := q.Enqueue(event, line); err != nil {
-		return fail(1, "finish.sh: %v", err)
-	}
-	fmt.Printf("FINISH %s task=%s round=%s\n", event, task, round)
 	return 0
+}
+
+// shortfall says why evidence does not meet a playbook, or "" if it does.
+func shortfall(pb *playbook.Playbook, ev *events.Evidence) string {
+	var why []string
+	if playbook.Rank(ev.Level) < playbook.Rank(pb.Floor) {
+		why = append(why, fmt.Sprintf("evidence %s is below the %s floor %s", ev.Level, pb.Kind, pb.Floor))
+	}
+	if pb.Floor != "none" && len(ev.Ran) == 0 {
+		why = append(why, "no --ran command recorded")
+	}
+	for _, need := range pb.Need {
+		found := false
+		for _, f := range ev.Flags {
+			found = found || f == need
+		}
+		if !found {
+			why = append(why, "missing --flag "+need)
+		}
+	}
+	return strings.Join(why, "; ")
 }

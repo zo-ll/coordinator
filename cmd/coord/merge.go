@@ -1,129 +1,156 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
+	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
+	"os"
+	"os/exec"
+	"syscall"
+	"time"
 
 	"github.com/zo-ll/coordinator/internal/cfg"
 	"github.com/zo-ll/coordinator/internal/events"
-	"github.com/zo-ll/coordinator/internal/ledger"
+	"github.com/zo-ll/coordinator/internal/model"
+	"github.com/zo-ll/coordinator/internal/playbook"
 )
 
-// Merge a passed slice. The review was of the WORKING-TREE STATE (workers
-// only stage), so approval binds to a diff hash, not a commit: merge
-// recomputes the reviewed state, authors the commit on the slice branch with
-// the user's identity, merges it, and pushes if origin exists.
+// Merge a passed unit, bound to the exact reviewed state.
 //
-//	merge --slice <id>  -> MERGE <id> base=<b> sha=<merge-commit>
-//	                       [PUSH <base> -> origin/<base>]
+//	merge <id>  -> MERGED <id> sha=<merge-commit> [PUSHED origin/<base>]
 //
-// Refuses unless: the verdict is pass, the recorded reviewed-state hash still
-// matches the worktree, nothing is unstaged or untracked (outside .scratch/),
-// and (unless autonomy=auto-merge) an approval exists at
-// $COORD_ROOT/approvals/<id>.
+// In order, refusing at the first failure: the unit is approved (or passed
+// under autonomy=auto-merge); the worktree's state hash equals the one the
+// critic reviewed; every `$ ` command in the brief's VERIFY passes, run in the
+// worktree (a failure appends verify_failed: the unit goes to handback); the
+// state hash is unchanged by those commands. Then the coordinator commits the
+// reviewed state with the user's identity, merges it into the base, and pushes
+// if origin exists.
 func cmdMerge(args []string) int {
-	var slice string
-	if c := flags("merge.sh", args, map[string]*string{"--slice": &slice}, nil); c != 0 {
-		return c
+	id := arg(args, 0)
+	if id == "" {
+		return fail(2, "merge: <id> is required")
 	}
-	if slice == "" {
-		return fail(2, "merge.sh: --slice is required")
+	config := configPath()
+	r := load()
+	u := r.Units[id]
+	if u == nil {
+		return refuse(id, "merged", "unknown unit")
 	}
-	config, repo := configPath(), repoDir()
-	l := ledger.Ledger{Log: eventLog()}
-	get := func(field string) string {
-		n, _ := ledger.Field(field)
-		v, _ := l.Get(slice, n)
-		return v
-	}
-	verdict, head, wt, branch := get("verdict"), get("head"), get("worktree"), get("branch")
-
-	if verdict != "pass" {
-		if verdict == "" {
-			verdict = "none"
+	auto := cfg.Value(config, "autonomy") == "auto-merge"
+	if !(u.State == model.Approved || (u.State == model.Passed && auto)) {
+		if u.State == model.Passed {
+			return refuse(id, "merged", "needs the user's approval (coord approve %s)", id)
 		}
-		return fail(1, "merge: slice %s has no PASS verdict (got '%s')", slice, verdict)
+		return refuse(id, "merged", "cannot merge from %s", u.State)
 	}
-	if wt == "" || branch == "" {
-		return fail(1, "merge: slice %s has no worktree/branch", slice)
-	}
-	if cfg.Value(config, "autonomy") != "auto-merge" && !isFile(filepath.Join(coordRoot(), "approvals", slice)) {
-		return fail(1, "merge: no recorded user approval for %s", slice)
-	}
-	if _, err := git("-C", wt, "rev-parse", "HEAD"); err != nil {
-		return fail(1, "merge: cannot read HEAD in %s", wt)
-	}
-
-	// the review was of the working-tree state, not a commit: recompute the
-	// exact reviewed state (diff vs the slice base) and refuse on any drift.
-	diff, _ := gitRaw("-C", wt, "diff", "HEAD")
-	sum := sha256.Sum256(diff)
-	if hash := hex.EncodeToString(sum[:]); hash != head {
-		return fail(1, "merge: reviewed state %s != current %s (re-review required)", head, hash)
-	}
-	if names, _ := git("-C", wt, "diff", "--name-only"); names != "" {
-		return fail(1, "merge: unstaged tracked changes in %s (workers must stage everything)", wt)
-	}
-	st, _ := git("-C", wt, "status", "--porcelain")
-	for _, line := range strings.Split(st, "\n") {
-		if p, ok := strings.CutPrefix(line, "?? "); ok && !strings.HasPrefix(p, ".scratch/") {
-			return fail(1, "merge: untracked files (outside .scratch/) were never staged")
-		}
-	}
-
+	repo := repoRoot()
 	base, ok := cfg.Get(config, "merge.base")
-	if !ok {
+	if !ok || base == "" {
 		base = "main"
 	}
-	if _, err := git("-C", repo, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
-		return fail(1, "merge: base '%s' not found in %s", base, repo)
+	if cur, _ := git("-C", repo, "rev-parse", "--abbrev-ref", "HEAD"); cur != base {
+		return refuse(id, "merged", "the repo is on %q, not the base %q", cur, base)
 	}
-	email, name := identity(repo)
 
-	// the coordinator authors the commit on the slice branch (user's identity only)
-	goal, ok := l.Get(slice, ledger.FGoal)
-	if !ok {
-		goal = slice
+	hash, err := stateHash(u.Worktree)
+	if err != nil {
+		return refuse(id, "merged", "cannot hash %s: %v", u.Worktree, err)
 	}
-	if err := gitLoud("-C", wt, "-c", "user.email="+email, "-c", "user.name="+name, "commit", "-q", "-m", "[coord] "+goal); err != nil {
-		return fail(1, "merge: commit failed in %s", wt)
+	if hash != u.PassState {
+		return refuse(id, "merged", "reviewed state %s != current %s (re-review required)", u.PassState, hash)
 	}
-	if _, err := git("-c", "user.email="+email, "-c", "user.name="+name, "-C", repo, "merge", "--no-ff", "--no-edit", branch); err != nil {
-		return fail(1, "merge: git merge failed for %s", branch)
+
+	// VERIFY, re-run by the engine on the reviewed state
+	raw, _ := os.ReadFile(u.WorkerBrief)
+	timeout := 10 * time.Minute
+	if v := cfg.Value(config, "verify.timeout"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+	vlog := runPath("log", id+".verify.log")
+	os.Remove(vlog)
+	for _, cmd := range playbook.ParseBrief(raw).Verify() {
+		if code := runVerify(u.Worktree, cmd, vlog, timeout); code != 0 {
+			return verifyFailed(id, cmd, code, vlog, fmt.Sprintf("verify failed: %s (exit %d)", cmd, code))
+		}
+	}
+	if after, err := stateHash(u.Worktree); err != nil || after != hash {
+		return verifyFailed(id, "(verify modified the worktree)", 0, vlog, "verify modified the worktree")
+	}
+
+	email, name := identity(repo)
+	if err := gitLoud("-C", u.Worktree, "add", "-A", "--", ".", ":(exclude).scratch"); err != nil {
+		return refuse(id, "merged", "cannot stage the reviewed state in %s", u.Worktree)
+	}
+	if err := gitLoud("-C", u.Worktree, "-c", "user.email="+email, "-c", "user.name="+name, "commit", "-q", "-m", "[coord] "+u.Goal); err != nil {
+		return refuse(id, "merged", "commit failed in %s (nothing to commit?)", u.Worktree)
+	}
+	if _, err := git("-c", "user.email="+email, "-c", "user.name="+name, "-C", repo, "merge", "--no-ff", "--no-edit", u.Branch); err != nil {
+		git("-C", repo, "merge", "--abort")
+		git("-C", u.Worktree, "reset", "-q", "--soft", "HEAD~1")
+		_, err := commit(func(*model.Run) ([]events.Event, error) {
+			return []events.Event{{Type: "rejected", Unit: id, By: "engine",
+				Text: fmt.Sprintf("merge into %s conflicted; bring the change up to date with %s in a correction round", base, base)}}, nil
+		})
+		if err != nil {
+			return refused(err)
+		}
+		return refuse(id, "merged", "git merge of %s into %s conflicted (unit returned to handback)", u.Branch, base)
 	}
 
 	sha, _ := git("-C", repo, "rev-parse", "HEAD")
-	l.Record(events.Event{Type: "merged", Unit: slice, SHA: sha})
-	fmt.Printf("MERGE %s base=%s sha=%s\n", slice, base, sha)
+	if _, err := commit(func(*model.Run) ([]events.Event, error) {
+		return []events.Event{{Type: "merged", Unit: id, SHA: sha}}, nil
+	}); err != nil {
+		return refused(err)
+	}
+	fmt.Printf("MERGED %s sha=%s\n", id, sha)
 	if remotes, _ := git("-C", repo, "remote"); hasLine(remotes, "origin") {
 		if _, err := git("-C", repo, "push", "origin", base); err == nil {
-			fmt.Printf("PUSH %s -> origin/%s\n", base, base)
+			fmt.Printf("PUSHED origin/%s\n", base)
 		}
 	}
 	return 0
 }
 
-// identity is the repo user's git identity, with the coordinator's fallback.
-func identity(repo string) (email, name string) {
-	email, err := git("-C", repo, "config", "user.email")
-	if err != nil || email == "" {
-		email = "coord@local"
+// runVerify runs one VERIFY command in the worktree, bounded by timeout, with
+// its output appended to vlog; it returns the exit code (124 on timeout).
+func runVerify(wt, command, vlog string, timeout time.Duration) int {
+	f, err := os.OpenFile(vlog, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return 1
 	}
-	name, err = git("-C", repo, "config", "user.name")
-	if err != nil || name == "" {
-		name = "coordinator"
+	defer f.Close()
+	fmt.Fprintf(f, "$ %s\n", command)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	c := exec.CommandContext(ctx, "bash", "-c", command)
+	c.Dir, c.Stdout, c.Stderr = wt, f, f
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	c.Cancel = func() error { killGroup(c.Process.Pid, syscall.SIGKILL); return nil }
+	err = c.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		fmt.Fprintf(f, "(timed out after %s)\n", timeout)
+		return 124
 	}
-	return email, name
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	if err != nil {
+		return 1
+	}
+	return 0
 }
 
-func hasLine(s, want string) bool {
-	for _, l := range strings.Split(s, "\n") {
-		if l == want {
-			return true
-		}
+func verifyFailed(id, cmd string, code int, vlog, why string) int {
+	_, err := commit(func(*model.Run) ([]events.Event, error) {
+		return []events.Event{{Type: "verify_failed", Unit: id, Command: cmd, Exit: code, Log: vlog, Reason: why}}, nil
+	})
+	if err != nil {
+		return refused(err)
 	}
-	return false
+	return refuse(id, "merged", "%s (unit returned to handback; log %s)", why, vlog)
 }
