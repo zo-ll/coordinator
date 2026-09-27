@@ -38,32 +38,33 @@ resume_recipe() {
 
 join_by() { local IFS="$1"; shift; printf '%s' "$*"; }
 
-# current harness: env sentinels
-current=""
-source="unknown"
-if [ "${OPENCODE:-}" = "1" ]; then
-  current=opencode; source=env
-elif [ -n "${CLAUDECODE:-}${CLAUDE_CODE_ENTRYPOINT:-}" ]; then
-  current=claude; source=env
-elif [ -n "${PI_CODING_AGENT_SESSION_DIR:-}${PI_SESSION_ID:-}" ]; then
-  current=pi; source=env
-elif [ -n "${CODEX_HOME:-}" ]; then
-  current=codex; source=env
-fi
-
-# ancestor-walk fallback
-if [ -z "$current" ]; then
-  pid="$PPID"
-  for _ in $(seq 1 12); do
-    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')" || break
-    [ -n "$comm" ] || break
-    base="${comm##*/}"
-    for h in "${KNOWN[@]}"; do
-      if [ "$base" = "$h" ]; then current="$h"; source=ancestor; break 2; fi
-    done
-    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
-    { [ -n "$pid" ] && [ "$pid" -gt 1 ]; } || break
+# current harness: the nearest harness among our ancestors, since env vars
+# leak into nested harnesses (codex started from claude still has CLAUDECODE);
+# env sentinels only when the walk finds none. COORD_CURRENT overrides both.
+current="${COORD_CURRENT:-}"
+source="unknown"; [ -z "$current" ] || source=override
+pid="$PPID"
+for _ in $(seq 1 12); do
+  [ -z "$current" ] || break
+  comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')" || break
+  [ -n "$comm" ] || break
+  base="${comm##*/}"
+  for h in "${KNOWN[@]}"; do
+    if [ "$base" = "$h" ]; then current="$h"; source=ancestor; break 2; fi
   done
+  pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+  { [ -n "$pid" ] && [ "$pid" -gt 1 ]; } || break
+done
+if [ -z "$current" ]; then
+  if [ "${OPENCODE:-}" = "1" ]; then
+    current=opencode; source=env
+  elif [ -n "${CLAUDECODE:-}${CLAUDE_CODE_ENTRYPOINT:-}" ]; then
+    current=claude; source=env
+  elif [ -n "${PI_CODING_AGENT_SESSION_DIR:-}${PI_SESSION_ID:-}" ]; then
+    current=pi; source=env
+  elif [ -n "${CODEX_THREAD_ID:-}${CODEX_HOME:-}" ]; then
+    current=codex; source=env
+  fi
 fi
 
 # installed / spawnable

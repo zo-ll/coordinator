@@ -27,4 +27,10 @@ assert "$(coord_cfg get "$COORD_ENV_CONF" harness.codex.bin)" "$TMP/bin/codex"
 [ -n "$(coord_cfg get "$COORD_ENV_CONF" harness.codex.resume)" ] || { echo "  missing resume recipe"; exit 1; }
 has "$(coord_cfg get "$COORD_ENV_CONF" harness.codex.exec)" "|-m|__MODEL__|"
 
+# nested harnesses: the nearest ancestor wins over leaked env sentinels
+mkdir -p "$TMP/nest"; ln -sf "$(command -v bash)" "$TMP/nest/codex"
+out="$(CLAUDECODE=1 "$TMP/nest/codex" -c '"$COORD" detect; true')"
+has "$out" "DETECT current=codex"
+assert "$(coord_cfg get "$COORD_ENV_CONF" current_source)" "ancestor"
+
 echo "  detect ok"

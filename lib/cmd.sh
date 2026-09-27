@@ -810,12 +810,14 @@ cmd_start() {
       pi) [ -n "${PI_SESSION_ID:-}" ] && sid=$PI_SESSION_ID src=pi-env ;;
       codex)
         f=$(newest "${CODEX_HOME:-$HOME/.codex}/sessions" 'rollout-*.jsonl')
-        if [ -n "$f" ]; then
+        if [ -n "${CODEX_THREAD_ID:-}" ]; then sid=$CODEX_THREAD_ID src=codex-env
+        elif [ -n "$f" ]; then
           base=$(basename "$f" .jsonl)
           sid=$(awk -F- -v OFS=- 'NF >= 5 { print $(NF-4), $(NF-3), $(NF-2), $(NF-1), $NF; next } { print }' <<< "$base") src=codex-sessions
         fi ;;
       claude)
-        f=$(newest "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" '*.jsonl')
+        [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || { sid=$CLAUDE_CODE_SESSION_ID src=claude-env; }
+        [ -n "$sid" ] || f=$(newest "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" '*.jsonl')
         [ -n "$f" ] && sid=$(basename "$f" .jsonl) src=claude-projects ;;
     esac
   fi

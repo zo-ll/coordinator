@@ -17,9 +17,9 @@ tool() { PATH="$ORIG_PATH" command -v "$1"; }
 
 # unset any harness sentinels inherited from the test runner
 unset OPENCODE CLAUDECODE CLAUDE_CODE_ENTRYPOINT PI_CODING_AGENT_SESSION_DIR PI_SESSION_ID CODEX_HOME
-# pin the current harness with a sentinel (opencode is never spawnable here),
-# so the ancestor walk cannot pick up whatever harness runs the tests
-export OPENCODE=1
+# pin the current harness (opencode is never spawnable here), so the
+# ancestor walk cannot pick up whatever harness runs the tests
+export COORD_CURRENT=opencode
 
 make_bin() { # make_bin <harness...>  -> minimal PATH with core tools (+ fakes)
   rm -rf "$TMP/bin"

@@ -4,7 +4,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 setup_run
-unset PI_SESSION_ID COORD_SESSION
+unset PI_SESSION_ID COORD_SESSION CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID
 printf 'current=codex\nharness.codex.resume=codex|exec|resume|__SESSION__|__BATCH__\n' > "$COORD_ENV_CONF"
 cd "$REPO"
 printf 'user work\n' > staged.txt
@@ -33,6 +33,9 @@ assert "$("$COORD" cfg get .coordinator/config.conf relay.resume)" "codex|exec|r
 wait_for test -f .coordinator/relay.pid
 has "$("$COORD" status | head -n1)" "relay=$pid alive=1"
 kill "$pid"
+
+# a harness's own session variable wins over scanning session files
+has "$(CODEX_THREAD_ID=thread-9 "$COORD" start --no-relay)" "SESSION thread-9 source=codex-env"
 
 # no invented ids: an unresolvable session is a loud failure
 printf 'current=pi\n' > "$COORD_ENV_CONF"
