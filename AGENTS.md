@@ -1,6 +1,6 @@
 # coordinator
 
-Multi-agent protocol for producing software. See [SPEC-v2.md](SPEC-v2.md).
+Multi-agent protocol for producing software. See [SPEC.md](SPEC.md).
 
 ## Conventions
 
@@ -22,7 +22,7 @@ Multi-agent protocol for producing software. See [SPEC-v2.md](SPEC-v2.md).
   in code with a test and in `coord help`; `SKILL.md`, `agents/`, and
   `playbooks/` hold only judgment. Keep `SKILL.md` lean.
 - bash 4.4+, coreutils, util-linux (`flock`, `setsid`), awk, git. No `python`,
-  `node`, or `tmux` dependency in the core; a terminal multiplexer is optional.
+  `node`, or `tmux` dependency.
 - Every shell file is `#!/usr/bin/env bash` with `set -euo pipefail`. Mind
   `pipefail`: a pipeline whose first command may exit nonzero on purpose needs
   `|| true`, or `set -e` ends the command silently.

@@ -222,9 +222,7 @@ build_argv() {
 }
 
 # launch <role> <cwd> <logfile> <slug> <argv...>: run a role detached in its
-# own session, through the first enabled adapter that takes it
-# (adapters/<name>.sh: adapter_launch <cwd> <log> <argv...> -> pid), else
-# under setsid with output appended to the log. Prints the pid.
+# own session under setsid, output appended to the log. Prints the pid.
 launch() {
   local role=$1 cwd=$2 logf=$3 slug=$4; shift 4
   mkdir -p "$(dirname "$logf")"
@@ -234,16 +232,6 @@ launch() {
     [ -z "${COMMIT_LOCK:-}" ] || exec {COMMIT_LOCK}>&-
     [ -z "${RELAY_LOCK:-}" ] || exec {RELAY_LOCK}>&-
     export COORD_EVENTS="$LOG" COORD_OWES="$slug"
-    adapters=${COORD_ADAPTERS:-$SKILL/adapters}
-    for name in $(cfg_val "$CONFIG" adapters | tr ',' ' '); do
-      [ "$name" = none ] && continue
-      [ -f "$adapters/$name.sh" ] || continue
-      # shellcheck source=/dev/null
-      . "$adapters/$name.sh"
-      if pid=$(ADAPTER_NAME="$role" adapter_launch "$cwd" "$logf" "$@") && [[ $pid =~ ^[0-9]+$ ]]; then
-        echo "$pid"; exit 0
-      fi
-    done
     cd "$cwd" || exit 1
     setsid "$@" >>"$logf" 2>&1 </dev/null &
     echo $!

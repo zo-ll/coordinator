@@ -5,7 +5,7 @@ agent cuts a goal into typed units, workers build them in isolated git
 worktrees, independent critics review them against evidence rules, and the
 engine merges only approved work whose checks it re-runs itself.
 
-[SPEC-v2.md](SPEC-v2.md) is the design; `bin/coord help` is the command
+[SPEC.md](SPEC.md) is the design; `bin/coord help` is the command
 reference. The engine is bash (`bin/coord`, with
 `lib/` and `libexec/`): nothing to build or install beyond bash 4.4+,
 coreutils, util-linux, awk and git. No `tmux`, `python`, or `node`, and one
@@ -47,7 +47,7 @@ installed agent harness (codex, claude, pi, opencode, …) is enough.
   reviewers on risky units). Small jobs skip the ceremony, and reversible
   questions become gates (`coord gate`) with a default instead of blocking.
 - `SKILL.md` is what the coordinator agent loads; `agents/` are the role
-  preambles; `adapters/` are optional launch overrides (tmux).
+  preambles.
 
 ## Install
 

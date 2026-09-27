@@ -323,42 +323,12 @@ Delivery stays at-least-once: a relay crash between `claimed` and `acked`
 leaves the batch claimed; on restart the relay appends `nacked` and
 delivers it again. Resume retries and give-up behavior are v1's.
 
-### Delivery in tmux (planned; the default once built)
-
-The coordinator is the user's own harness session, and its window is the
-coordinator's UI. The headless resume above wakes it in a hidden background
-process, so after boot the visible window goes stale. With tmux (the default
-when `coord start` runs inside tmux), wakes land in that window instead:
-
-- `coord start` records the coordinator's tmux pane id (`%12`, not a window
-  name) in `.coordinator/`.
-- The relay delivers a batch by typing one line into that pane:
-  `tmux send-keys -t <pane> -l 'WAKE batch=<path>'`, then `Enter`. It types
-  only when the pane's input line is empty (`tmux capture-pane`), so it never
-  garbles what the user is typing.
-- **Delivery is acknowledged by the coordinator**, not by a process exit: the
-  first command of every turn is `coord ack <batch>`, which appends `acked`.
-  With no ack within `relay.ack_timeout` (default 30s), the relay inspects the
-  pane; a dialog on screen becomes a needs-you event, otherwise it retypes
-  once, then nacks and reports. A missing pane is reported the same way.
-- Each worker, critic, and researcher launch runs headless in its own tmux
-  window, output streaming to its log as today, so attaching is
-  `tmux select-window`.
-- `coord watch` runs in a pane beside the coordinator: everything that is not
-  the coordinator (units, launches, what needs the user).
-
-Without tmux (CI, native Windows), delivery falls back to the headless resume.
-
 ### Optional capabilities
 
 The engine requires nothing but bash and a harness that can run headless.
-Two capabilities make it lighter when present, and each has a fallback so no
-harness or tool becomes a dependency:
+One capability makes it lighter when present, with a fallback so no harness
+becomes a dependency:
 
-- **A terminal multiplexer** (tmux, zellij, wezterm, kitty, screen, …),
-  through a per-multiplexer adapter: wakes typed into the coordinator's pane,
-  agents in their own panes, the watch panel's popups and menus. Fallback:
-  headless resume and a panel-only watch (see `docs/watch-bash-brief.md`).
 - **Native subagents** in the coordinator's harness (Claude Code's Task tool,
   opencode subagents, pi's subagent extension): used only for short,
   read-only helpers (an arena judge, interrogation reviewers, research
@@ -419,8 +389,7 @@ The coordinator never reads a worker's diff; the critic is the only content
 reviewer. Workers stage and never commit; the coordinator authors every commit
 with the user's identity after an approved pass on the exact reviewed state.
 Workers run with full permissions inside their worktree. One unit, one
-worktree, one branch. Adapters change launch only. Config is parsed, never
-sourced or executed.
+worktree, one branch. Config is parsed, never sourced or executed.
 
 ## Testing Decisions
 
@@ -445,27 +414,6 @@ sourced or executed.
 - **Merge verify**: a failing VERIFY command refuses the merge and moves the
   unit to `handback`; a command that writes a new untracked file refuses with
   `verify modified the worktree`; passing commands merge.
-
-## Migration
-
-Callers first, then delete the old path.
-
-1. **Port 1:1.** *(done)* `coord` implements the v1 CLI contracts; `scripts/*.sh` become
-   one-line shims (`exec coord <verb> "$@"`). Done when the v1 suite passes
-   unchanged against the binary.
-2. **Event log.** *(done)* Replace the queue, ledger, and journal with `events.log`
-   behind the same commands. v1 suite still green. (Queue delivery is the
-   `enqueued`/`claimed`/`acked`/`nacked` events; tests that read queue files
-   now assert through `queue depth` and batch contents; `ENQUEUED` prints
-   `seq=<n>` instead of a file name.)
-3. **v2 model.** *(done)* Add kinds, playbooks, evidence, engine-computed rounds and
-   slugs, the timebox scheduler, and the v2 CLI. Update SKILL.md and the role
-   preambles. Port the tests to the v2 CLI.
-4. **Delete v1.** *(done)* Remove the shims and v1-only tests once SKILL.md and all
-   recipes call `coord` directly.
-
-A run in progress is not migrated across phases; finish it on the version that
-started it.
 
 ## Out of Scope
 
@@ -506,12 +454,7 @@ Made during implementation (2026-09-27):
    launches, then commits the `dispatched` event; if a concurrent change makes
    it illegal, the new process group gets SIGTERM.
 
-10. **tmux is the default delivery** (planned; see Delivery in tmux): the
-    harness window stays the coordinator for the whole run, wakes are typed
-    into it and acknowledged with `coord ack`, and launches get their own tmux
-    windows. Headless resume stays as the fallback.
-
-11. **The engine is bash, not Go.** After the v2 model was built in Go, the
+10. **The engine is bash, not Go.** After the v2 model was built in Go, the
     engine was ported back to bash so the skill needs nothing but tools already
     on a Linux system and stays editable in place. The CLI contract was kept
     exactly, so the same black-box suite verifies it; the log became
@@ -520,24 +463,24 @@ Made during implementation (2026-09-27):
     log transaction that records it, so a fast agent's `finish` can never
     arrive before its `dispatched`.
 
-12. **Native subagents are an optional capability for read-only helpers**
+11. **Native subagents are an optional capability for read-only helpers**
     (see Optional capabilities). This recovers most of the lightness of
     platforms that provide spawning and notification (pstack on Cursor)
     without depending on any harness.
 
-13. **The CLI carries the protocol; the skill carries judgment.** Routing,
+12. **The CLI carries the protocol; the skill carries judgment.** Routing,
     boot, brief fields, gates, and standing orders moved from SKILL.md into
     `coord` (next steps in each batch, `init`, `brief`, `gate`, `standing`,
     `help`), so the skill is only what the engine cannot decide. `render` was
     dropped; `status` is the view.
 
-14. **Roles are the user's, layered and checked.** `coord role` configures
+13. **Roles are the user's, layered and checked.** `coord role` configures
     each role agent's harness, model, and skills, with personal defaults under
     per-repo settings. Skills attach per role only, and reach the agent as a
     SKILL.md path in its prompt rather than through any harness's own skill
     loading.
 
-15. **VERIFY runs on a commit of the reviewed state.** Files VERIFY creates are
+14. **VERIFY runs on a commit of the reviewed state.** Files VERIFY creates are
     dropped instead of blocking the merge (a Python test run leaves
     `__pycache__`); edits to reviewed files still refuse it. VERIFY stays in
     the worker's worktree, not a fresh checkout, so gitignored dependencies

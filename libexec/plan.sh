@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # Reduce detected facts to a proposal + the fields to ask about.
 #
-#   plan.sh -> PROPOSE critic=… researcher=… lane.default=… lane.strong=… autonomy=… tracker=… adapters=…
-#              ASK models autonomy [roles] [adapters] [tracker]
+#   plan.sh -> PROPOSE critic=… researcher=… lane.default=… lane.strong=… autonomy=…
+#              ASK models autonomy [roles]
 #
 # Writes $COORD_HOME/proposal.conf (machine-readable) for apply.sh.
-# Rules: one spawnable harness forces the role map and lanes; no tmux forces
-# adapters=none; no gh forces tracker=local; model is ALWAYS asked (default is
-# only chosen if the user affirms it).
+# Rules: one spawnable harness forces the role map and lanes; model is ALWAYS
+# asked (default is only chosen if the user affirms it).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,14 +21,12 @@ get() { "$CFG" get "$ENV_CONF" "$1" 2>/dev/null || true; }
 
 # already configured -> nothing to ask
 if [ -f "$CONFIG" ]; then
-  printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=%s tracker=%s adapters=%s\n' \
+  printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=%s\n' \
     "$("$CFG" get "$CONFIG" critic.harness 2>/dev/null || echo -)" \
     "$("$CFG" get "$CONFIG" researcher.harness 2>/dev/null || echo -)" \
     "$("$CFG" get "$CONFIG" lane.default.harness 2>/dev/null || echo -)" \
     "$("$CFG" get "$CONFIG" lane.strong.harness 2>/dev/null || echo none)" \
-    "$("$CFG" get "$CONFIG" autonomy 2>/dev/null || echo -)" \
-    "$("$CFG" get "$CONFIG" tracker 2>/dev/null || echo -)" \
-    "$("$CFG" get "$CONFIG" adapters 2>/dev/null || echo -)"
+    "$("$CFG" get "$CONFIG" autonomy 2>/dev/null || echo -)"
   printf 'ASK\n'
   exit 0
 fi
@@ -50,7 +47,6 @@ if [ "${#sp[@]}" -gt 1 ]; then
   [ -n "$lane_strong" ] && routing_risky="strong"
 fi
 
-tmux="$(get tmux)"; gh="$(get gh)"
 
 : > "$PROPOSAL"
 "$CFG" set "$PROPOSAL" critic.harness "$critic"
@@ -59,15 +55,12 @@ tmux="$(get tmux)"; gh="$(get gh)"
 "$CFG" set "$PROPOSAL" researcher.model ""
 "$CFG" set "$PROPOSAL" lane.default.harness "$lane_default"
 "$CFG" set "$PROPOSAL" lane.default.model ""
-"$CFG" set "$PROPOSAL" routing.mechanical default
 "$CFG" set "$PROPOSAL" routing.risky "$routing_risky"
 if [ -n "$lane_strong" ]; then
   "$CFG" set "$PROPOSAL" lane.strong.harness "$lane_strong"
   "$CFG" set "$PROPOSAL" lane.strong.model ""
 fi
 "$CFG" set "$PROPOSAL" autonomy approve-merge
-"$CFG" set "$PROPOSAL" tracker local
-"$CFG" set "$PROPOSAL" adapters none
 
 # ASK block: concrete keys with proposed values, so the coordinator can present
 # a real question. Empty model value = "harness default" (the user must confirm).
@@ -79,8 +72,6 @@ fi
 ask+=("critic.model=" "researcher.model=" "lane.default.model=")
 [ -n "$lane_strong" ] && ask+=("lane.strong.model=")
 ask+=("autonomy=approve-merge")
-[ "$tmux" = 1 ] && ask+=("adapters=none")
-[ "$gh" = 1 ] && ask+=("tracker=local")
 
 # the user's own defaults (coord role --global) are already decided: leave
 # the repo key empty so they apply, and don't ask about them
@@ -102,7 +93,7 @@ for k in critic.harness critic.model researcher.harness researcher.model \
   ask=("${keep[@]}")
 done
 
-printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=approve-merge tracker=local adapters=none\n' \
+printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=approve-merge\n' \
   "$critic" "$researcher" "$lane_default" "${lane_strong:-none}"
 printf 'ASK\n'
 for l in "${ask[@]}"; do printf '  %s\n' "$l"; done

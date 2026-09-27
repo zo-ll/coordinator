@@ -145,7 +145,7 @@ EOF
     ;;
     log) echo 'coord log [<id>]   "<seq> <type> <unit|-> <what>" per event' ;;
     done) echo 'coord done   -> DONE units=<n> (exit 0) | OPEN <ids> (exit 1)' ;;
-    detect) echo 'coord detect   -> DETECT current=<h> installed=<a,b> spawnable=<a,b> tmux=0|1 gh=0|1' ;;
+    detect) echo 'coord detect   -> DETECT current=<h> installed=<a,b> spawnable=<a,b>' ;;
     plan) echo 'coord plan   -> PROPOSE <key=value>... then an ASK block of fields to confirm' ;;
     apply) echo 'coord apply --accept | --answers "key=value ..."   -> OK config=<path> | FAIL <field>: <reason>' ;;
     start) cat <<'EOF'

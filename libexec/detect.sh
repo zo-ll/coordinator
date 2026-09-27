@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Detect the environment and write $COORD_HOME/env.conf.
 #
-#   detect.sh   -> DETECT current=<h> installed=<a,b> spawnable=<a,b> tmux=0|1 gh=0|1
+#   detect.sh   -> DETECT current=<h> installed=<a,b> spawnable=<a,b>
 #
 # Current harness: env sentinel first, else walk the ancestor process chain.
 # Installed: command -v over the known list (override with COORD_KNOWN).
@@ -77,22 +77,11 @@ for h in "${installed[@]}"; do
   exec_recipe "$h" >/dev/null 2>&1 && spawnable+=("$h")
 done
 
-tmux=0; command -v tmux >/dev/null 2>&1 && tmux=1
-tmux_inside=0; [ -n "${TMUX:-}" ] && tmux_inside=1
-gh=0; command -v gh >/dev/null 2>&1 && gh=1
-glab=0; command -v glab >/dev/null 2>&1 && glab=1
-git=0; command -v git >/dev/null 2>&1 && git=1
-
 : > "$ENV_CONF"
 "$CFG" set "$ENV_CONF" current "$current"
 "$CFG" set "$ENV_CONF" current_source "$source"
 "$CFG" set "$ENV_CONF" installed "$(join_by , "${installed[@]:-}")"
 "$CFG" set "$ENV_CONF" spawnable "$(join_by , "${spawnable[@]:-}")"
-"$CFG" set "$ENV_CONF" tmux "$tmux"
-"$CFG" set "$ENV_CONF" tmux_inside "$tmux_inside"
-"$CFG" set "$ENV_CONF" gh "$gh"
-"$CFG" set "$ENV_CONF" glab "$glab"
-"$CFG" set "$ENV_CONF" git "$git"
 for h in "${spawnable[@]:-}"; do
   [ -n "$h" ] || continue
   "$CFG" set "$ENV_CONF" "harness.$h.bin" "$(command -v "$h")"
@@ -100,5 +89,5 @@ for h in "${spawnable[@]:-}"; do
   "$CFG" set "$ENV_CONF" "harness.$h.resume" "$(resume_recipe "$h")"
 done
 
-printf 'DETECT current=%s installed=%s spawnable=%s tmux=%s gh=%s\n' \
-  "${current:-none}" "$(join_by , "${installed[@]:-}")" "$(join_by , "${spawnable[@]:-}")" "$tmux" "$gh"
+printf 'DETECT current=%s installed=%s spawnable=%s\n' \
+  "${current:-none}" "$(join_by , "${installed[@]:-}")" "$(join_by , "${spawnable[@]:-}")"

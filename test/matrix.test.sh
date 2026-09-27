@@ -3,7 +3,6 @@
 #   one harness  -> role map forced, no "roles" asked
 #   zero harness -> boot fails cleanly
 #   two harnesses-> role map asked, lane.strong proposed
-#   no tmux/gh   -> adapters=none, tracker=local forced
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 coord_detect() { "$COORD" detect "$@"; }
@@ -51,17 +50,16 @@ fresh one
 # is forced.
 out="$(PATH="$TMP/bin" coord_detect)"
 assert "$(printf '%s\n' "$out" | sed -E 's/current=[^ ]+ //')" \
-  "DETECT installed=codex spawnable=codex tmux=0 gh=0"
+  "DETECT installed=codex spawnable=codex"
 out="$(PATH="$TMP/bin" coord_plan)"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
-  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge tracker=local adapters=none"
+  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge"
 assert "$(printf '%s\n' "$out" | sed -n 2p)" "ASK"
 printf '%s\n' "$out" | grep -qx '  critic.model=' || { echo "  ASK missing critic.model"; exit 1; }
 if printf '%s\n' "$out" | grep -q '  critic.harness='; then echo "  roles should be forced"; exit 1; fi
 PATH="$TMP/bin" coord_apply --accept >/dev/null
 assert "$(coord_cfg get "$COORD_CONFIG" critic.harness)" "codex"
 assert "$(coord_cfg get "$COORD_CONFIG" lane.default.harness)" "codex"
-assert "$(coord_cfg get "$COORD_CONFIG" adapters)" "none"
 
 # --- zero harnesses: plan fails cleanly
 make_bin
@@ -76,7 +74,7 @@ fresh two
 PATH="$TMP/bin" coord_detect >/dev/null
 out="$(PATH="$TMP/bin" coord_plan)"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
-  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge tracker=local adapters=none"
+  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge"
 case "$(printf '%s\n' "$out" | tail -n +2)" in
   *critic.harness=codex*lane.strong.harness=claude*) ;;
   *) echo "  multi-harness ASK missing roles"; exit 1 ;;
