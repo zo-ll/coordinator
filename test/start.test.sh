@@ -7,10 +7,14 @@ setup_run
 unset PI_SESSION_ID COORD_SESSION
 printf 'current=codex\nharness.codex.resume=codex|exec|resume|__SESSION__|__BATCH__\n' > "$COORD_ENV_CONF"
 cd "$REPO"
+printf 'user work\n' > staged.txt
+git add staged.txt
 
 out="$("$COORD" start --session test-sess --no-relay)"
 assert "$out" "SESSION test-sess source=user harness=codex repo=$REPO"
 assert "$(cat .coordinator/session)" "test-sess"
+assert "$(git diff --cached --name-only)" "staged.txt"
+if git show HEAD:staged.txt >/dev/null 2>&1; then echo "  boot committed unrelated staged work"; exit 1; fi
 # run state is ignored, committed choices are not
 git log --oneline | grep -q 'ignore run state in .coordinator/' || { echo "  .coordinator/.gitignore not committed"; exit 1; }
 git check-ignore -q .coordinator/events.log || { echo "  event log not ignored"; exit 1; }
@@ -18,6 +22,7 @@ git check-ignore -q .coordinator/worktrees/x/file || { echo "  worktrees not ign
 if git check-ignore -q .coordinator/config.conf; then echo "  config.conf ignored"; exit 1; fi
 if git check-ignore -q .coordinator/playbooks/feature.md; then echo "  playbooks ignored"; exit 1; fi
 grep -q bypassPermissions .claude/settings.local.json || { echo "  claude settings missing"; exit 1; }
+assert "$(git show --pretty=format: --name-only HEAD | sed '/^$/d')" ".claude/settings.local.json"
 
 # starts a detached relay for this run, pinning the resume recipe
 out="$("$COORD" start --session s2)"

@@ -385,7 +385,7 @@ verify_failed() { # <id> <command> <exit> <log> <why>
   refuse "$1" merged "$5 (unit returned to handback; log $4)"
 }
 
-#   merge <id>  -> MERGED <id> sha=<sha> [PUSHED origin/<base>]
+#   merge <id>  -> MERGED <id> sha=<sha> (local merge only)
 cmd_merge() {
   local id=${1:-} base cur hash after secs vlog code cmd sha
   [ -n "$id" ] || { fail 2 'merge: <id> is required'; return; }
@@ -426,9 +426,6 @@ cmd_merge() {
   sha=$(git -C "$REPO" rev-parse HEAD)
   one_event type=merged unit="$id" sha="$sha" || return
   echo "MERGED $id sha=$sha"
-  if git -C "$REPO" remote | grep -qx origin; then
-    git -C "$REPO" push origin "$base" >/dev/null 2>&1 && echo "PUSHED origin/$base"
-  fi
   return 0
 }
 

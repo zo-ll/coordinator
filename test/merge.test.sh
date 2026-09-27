@@ -5,6 +5,10 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 setup_run
 brief "$TMP/brief"
+git init -q --bare "$TMP/remote.git"
+git -C "$REPO" remote add origin "$TMP/remote.git"
+git -C "$REPO" push -q origin main
+remote_before=$(git --git-dir="$TMP/remote.git" rev-parse refs/heads/main)
 to_passed() { # to_passed <id> [brief]
   "$COORD" unit add "$1" --kind feature --goal "unit $1" >/dev/null
   "$COORD" dispatch "$1" --role worker --brief "${2:-$TMP/brief}" >/dev/null
@@ -22,6 +26,8 @@ git -C "$(wt m1)" add -A     # staging after review does not change the state
 out="$("$COORD" merge m1)"
 has "$out" "MERGED m1 sha="
 hasnt "$out" "PUSHED"
+assert "$(git --git-dir="$TMP/remote.git" rev-parse refs/heads/main)" "$remote_before"
+if [ "$(git -C "$REPO" rev-parse main)" = "$remote_before" ]; then echo "  local merge did not advance main"; exit 1; fi
 git -C "$REPO" show main:file.txt | grep -q "change by m1.r1.worker" || { echo "  main lacks the change"; exit 1; }
 assert "$(git -C "$(wt m1)" log -1 --format='%an %s')" "t [coord] unit m1"
 assert "$(state_of m1)" "merged"

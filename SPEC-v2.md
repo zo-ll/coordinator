@@ -280,9 +280,10 @@ itself (see Merge). A pass whose tests do not actually pass never merges.
    worktree`, recorded as `verify_failed`), since the merged state must be the
    reviewed one.
 5. Stage the reviewed state and commit it with the user's identity, merge
-   `coord/<id>` with `--no-ff`, push if `origin` exists, append `merged`. A
-   conflicting merge is aborted, the commit undone, and `rejected` (by engine)
-   appended, so the unit returns to `handback` for a correction round.
+   `coord/<id>` with `--no-ff`, then append `merged`. Publishing is a separate
+   `git push` decision. On conflict, abort the merge, undo the commit, and
+   append `rejected` (by engine), returning the unit to `handback` for a
+   correction round.
 
 This is the one place the engine executes brief content. The commands are ones
 the coordinator wrote and the worker has already run with full permissions in

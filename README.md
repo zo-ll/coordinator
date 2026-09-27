@@ -28,7 +28,8 @@ installed agent harness (codex, claude, pi, opencode, …) is enough.
   playbook's floor it becomes a handback.
 - **Merge.** `coord merge <id>` needs approval (or `autonomy=auto-merge`), the
   exact reviewed state, and a passing re-run of the brief's VERIFY commands;
-  then it commits with the user's identity and merges.
+  then it commits with the user's identity and merges locally. Publishing is
+  a separate `git push` decision.
 - **Relay.** `coord relay` wakes the coordinator with one batch per wave of
   events, reports dead launches, kills launches past their timebox, and blocks
   a unit that dies twice in a round.
