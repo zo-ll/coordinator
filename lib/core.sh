@@ -307,7 +307,7 @@ pb_section() {
 # text), verify ("$ " commands in VERIFY). Fields start a line as FIELD:.
 brief() {
   awk -v mode="$2" -v want="${3:-}" '
-    function flush() { if (cur != "" || buf ~ /[^ \t\n]/) { if (!(cur in has)) order[++n] = cur; has[cur] = 1; t = buf; gsub(/^[ \t\n]+|[ \t\n]+$/, "", t); body[cur] = t } }
+    function flush() { if (cur != "" || buf ~ /[^ \t\n]/) { t = buf; gsub(/^[ \t\n]+|[ \t\n]+$/, "", t); if (!(cur in has)) { order[++n] = cur; body[cur] = t } else body[cur] = body[cur] "\n" t; has[cur] = 1 } }
     { sub(/\r$/, "") }
     match($0, /^[A-Z][A-Z_]*:/) { flush(); cur = substr($0, 1, RLENGTH - 1); buf = substr($0, RLENGTH + 1); next }
     { buf = buf "\n" $0 }

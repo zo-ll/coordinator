@@ -33,4 +33,13 @@ has "$("$COORD" dispatch b1 --role worker)" "round=2"
 grep -q 'CORRECTION: finish the other half' "$REPO/.coordinator/briefs/b1.r2.worker.md" || { echo "  worker prompt lacks CORRECTION"; exit 1; }
 
 refuses "unknown unit" "$COORD" brief nope
+# a field written twice is one field with both lines, for the critic too
+"$COORD" unit add r2 --kind chore --goal r2 >/dev/null
+brief "$TMP/twice"; echo "ACCEPTANCE: second criterion" >> "$TMP/twice"
+FAKE_WORKER=done "$COORD" dispatch r2 --role worker --brief "$TMP/twice" >/dev/null
+wait_for is_state r2 built
+FAKE_CRITIC=sleep "$COORD" dispatch r2 --role critic >/dev/null
+c="$REPO/.coordinator/briefs/r2.r1.critic.md"
+grep -q "file.txt has more than one line" "$c" && grep -q "second criterion" "$c" || { echo "  critic lost a repeated field:"; cat "$c"; exit 1; }
+
 echo "  brief ok"
