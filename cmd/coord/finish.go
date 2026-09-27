@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zo-ll/coordinator/internal/events"
 	"github.com/zo-ll/coordinator/internal/queue"
 )
 
@@ -23,7 +24,9 @@ var (
 //	       --head <sha|-> --summary "one line"
 //
 // Marker: $COORD_MARKERS/<event>.done (default <cwd>/.scratch/status),
-// written BEFORE the ping is enqueued so a crash between the two is recoverable.
+// written BEFORE the ping is enqueued. The ping is an `enqueued` event in the
+// run's log ($COORD_EVENTS, or the nearest .coordinator/events.jsonl above
+// the working directory); finish never creates a log it was not pointed at.
 func cmdFinish(args []string) int {
 	var event, role, result, summary string
 	head := "-"
@@ -37,6 +40,12 @@ func cmdFinish(args []string) int {
 	}
 	if !slugRe.MatchString(event) {
 		return fail(2, "finish.sh: invalid --event slug '%s' (use [A-Za-z0-9._-]+)", event)
+	}
+
+	// never start a log nobody reads: a finish must name or find its run's log
+	logPath := existingEventsPath()
+	if logPath == "" {
+		return fail(1, "finish.sh: no event log (set COORD_EVENTS, or run inside the repo or its worktrees)")
 	}
 
 	// foo -> foo/r1; foo.critic -> foo/r1; foo.r2 -> foo/r2; foo.r2.critic -> foo/r2
@@ -62,10 +71,7 @@ func cmdFinish(args []string) int {
 	if role == "critic" {
 		line = fmt.Sprintf("VERDICT %s: %s @ %s — %s", task, result, head, summary)
 	}
-	q, err := queue.Open(coordRoot())
-	if err != nil {
-		return fail(1, "finish.sh: %v", err)
-	}
+	q := queue.Queue{Log: events.Log{Path: logPath}}
 	if _, _, err := q.Enqueue(event, line); err != nil {
 		return fail(1, "finish.sh: %v", err)
 	}

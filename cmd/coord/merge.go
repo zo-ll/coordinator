@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/zo-ll/coordinator/internal/cfg"
+	"github.com/zo-ll/coordinator/internal/events"
 	"github.com/zo-ll/coordinator/internal/ledger"
 )
 
@@ -32,7 +33,7 @@ func cmdMerge(args []string) int {
 		return fail(2, "merge.sh: --slice is required")
 	}
 	config, repo := configPath(), repoDir()
-	l := ledger.Ledger{Path: ledgerPath()}
+	l := ledger.Ledger{Log: eventLog()}
 	get := func(field string) string {
 		n, _ := ledger.Field(field)
 		v, _ := l.Get(slice, n)
@@ -83,7 +84,7 @@ func cmdMerge(args []string) int {
 	email, name := identity(repo)
 
 	// the coordinator authors the commit on the slice branch (user's identity only)
-	goal, ok := l.Get(slice, 11)
+	goal, ok := l.Get(slice, ledger.FGoal)
 	if !ok {
 		goal = slice
 	}
@@ -95,7 +96,7 @@ func cmdMerge(args []string) int {
 	}
 
 	sha, _ := git("-C", repo, "rev-parse", "HEAD")
-	l.Set(slice, map[int]string{1: "merged", 10: sha})
+	l.Record(events.Event{Type: "merged", Unit: slice, SHA: sha})
 	fmt.Printf("MERGE %s base=%s sha=%s\n", slice, base, sha)
 	if remotes, _ := git("-C", repo, "remote"); hasLine(remotes, "origin") {
 		if _, err := git("-C", repo, "push", "origin", base); err == nil {

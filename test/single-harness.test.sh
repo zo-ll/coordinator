@@ -16,7 +16,7 @@ export COORD_HOME="$TMP/coord"
 export COORD_ENV_CONF="$TMP/coord/env.conf"
 export COORD_CONFIG="$TMP/repo/.coordinator/config.conf"
 export COORD_ROOT="$TMP/coord"
-export COORD_LEDGER="$TMP/repo/.coordinator/ledger.tsv"
+export COORD_EVENTS="$TMP/repo/.coordinator/events.jsonl"
 export COORD_AGENTS="$TMP/no-agents"
 export FAKE_LOG="$TMP/fake.log"
 export FINISH="$HERE/../scripts/finish.sh"
@@ -59,6 +59,6 @@ for _ in $(seq 1 50); do "$QUEUE" pending && break; sleep 0.1; done
 
 grep -q '^resume sss-1 WAKE batch=' "$FAKE_LOG" || { echo "  resume not from same harness:"; cat "$FAKE_LOG"; exit 1; }
 grep -q 'do it' "$FAKE_LOG" || { echo "  worker did not run"; exit 1; }
-[ "$(ls "$COORD_ROOT/queue/.done" | wc -l)" = "1" ] || { echo "  event not acked"; exit 1; }
+[ "$("$QUEUE" depth)" = "QUEUE pending=0 inflight=0 done=1" ] || { echo "  event not acked"; exit 1; }
 
 echo "  single-harness ok"

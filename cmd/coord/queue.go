@@ -13,28 +13,25 @@ import (
 // queue pop-batch <batchfile>   -> claim all pending into <batchfile>, in order
 // queue ack | nack              -> claimed events to done / back to the queue
 func cmdQueue(args []string) int {
-	q, err := queue.Open(coordRoot())
-	if err != nil {
-		return fail(1, "queue: %v", err)
-	}
+	q := queue.Queue{Log: eventLog()}
 	switch arg(args, 0) {
 	case "enqueue":
 		slug, line := arg(args, 1), arg(args, 2)
 		if slug == "" || line == "" {
 			return fail(1, "queue: enqueue needs <slug> <line>")
 		}
-		f, dup, err := q.Enqueue(slug, line)
+		seq, dup, err := q.Enqueue(slug, line)
 		if err != nil {
 			return fail(1, "queue: %v", err)
 		}
 		if dup {
 			fmt.Printf("DUP %s\n", slug)
 		} else {
-			fmt.Printf("ENQUEUED %s %s\n", slug, f)
+			fmt.Printf("ENQUEUED %s seq=%d\n", slug, seq)
 		}
 	case "list":
 		for _, it := range q.List() {
-			fmt.Printf("%s %s %s\n", it.Seq, it.Slug, it.Path)
+			fmt.Printf("%s %s\n", it.Seq, it.Slug)
 		}
 	case "pending":
 		if !q.Pending() {

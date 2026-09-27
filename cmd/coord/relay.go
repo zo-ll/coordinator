@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zo-ll/coordinator/internal/cfg"
+	"github.com/zo-ll/coordinator/internal/events"
 	"github.com/zo-ll/coordinator/internal/fsx"
 	"github.com/zo-ll/coordinator/internal/ledger"
 	"github.com/zo-ll/coordinator/internal/queue"
@@ -63,17 +64,18 @@ func cmdRelay(args []string) int {
 	root := coordRoot()
 	config := configPath()
 	standing := env("COORD_STANDING", filepath.Join(filepath.Dir(config), "standing.md"))
-	l := ledger.Ledger{Path: env("COORD_LEDGER", filepath.Join(filepath.Dir(config), "ledger.tsv"))}
+	// the relay serves the run whose config it was started with
+	logPath := os.Getenv("COORD_EVENTS")
+	if logPath == "" {
+		logPath = filepath.Join(filepath.Dir(config), "events.jsonl")
+	}
+	log := events.Log{Path: logPath}
+	l, q := ledger.Ledger{Log: log}, queue.Queue{Log: log}
 	for _, d := range []string{root, filepath.Join(root, "batch")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return fail(1, "relay: %v", err)
 		}
 	}
-	q, err := queue.Open(root)
-	if err != nil {
-		return fail(1, "relay: %v", err)
-	}
-
 	// single relay: hold the lock for the process lifetime
 	lk, ok, err := fsx.TryLock(filepath.Join(root, "relay.lock"))
 	if err != nil {

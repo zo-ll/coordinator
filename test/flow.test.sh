@@ -14,7 +14,7 @@ export COORD_HOME="$TMP/coord"
 export COORD_ENV_CONF="$TMP/coord/env.conf"
 export COORD_CONFIG="$TMP/repo/.coordinator/config.conf"
 export COORD_ROOT="$TMP/coord"
-export COORD_LEDGER="$TMP/repo/.coordinator/ledger.tsv"
+export COORD_EVENTS="$TMP/repo/.coordinator/events.jsonl"
 export COORD_AGENTS="$TMP/no-agents"
 export RELAY_LOG="$TMP/resume.log"
 export FINISH="$HERE/../scripts/finish.sh"
@@ -54,7 +54,7 @@ for _ in $(seq 1 50); do "$QUEUE" pending && break; sleep 0.1; done
 COORD_RESUME="$TMP/fake-resume|__SESSION__|__BATCH__" COORD_SESSION="sess-x" "$RELAY" --once --interval 0.2
 
 [ "$(wc -l < "$RELAY_LOG" | tr -d ' ')" = "1" ] || { echo "  expected one resume"; exit 1; }
-[ "$(ls "$COORD_ROOT/queue/.done" | wc -l)" = "1" ] || { echo "  event not acked"; exit 1; }
+[ "$("$QUEUE" depth)" = "QUEUE pending=0 inflight=0 done=1" ] || { echo "  event not acked"; exit 1; }
 [ "$("$STATE" get s1 status)" = "dispatched" ] || { echo "  ledger wrong"; exit 1; }
 
 echo "  flow ok"

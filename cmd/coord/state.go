@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zo-ll/coordinator/internal/events"
 	"github.com/zo-ll/coordinator/internal/ledger"
 )
 
-// Slice ledger: the coordinator's memory. The LLM reads these one-line
-// outputs, never the TSV.
+// Slice ledger: the coordinator's memory, projected from the event log. The
+// LLM reads these one-line outputs, never the log.
 //
 //	state add <id> "<goal>" [--blockers 1,2]
 //	state ready                      -> unlock todo slices whose blockers are terminal
@@ -28,7 +29,7 @@ import (
 //	state done                       -> exit 0 iff every slice is merged|dropped
 //	state render                     -> write COORDINATION.md
 func cmdState(args []string) int {
-	l := ledger.Ledger{Path: ledgerPath()}
+	l := ledger.Ledger{Log: eventLog()}
 	sub, rest := arg(args, 0), args[min(1, len(args)):]
 	id := arg(rest, 0)
 	need := func(n int, what string) bool {
@@ -38,8 +39,9 @@ func cmdState(args []string) int {
 		}
 		return true
 	}
-	set := func(kv map[int]string, out string) int {
-		if err := l.Set(id, kv); err != nil {
+	record := func(e events.Event, out string) int {
+		e.Unit = id
+		if err := l.Record(e); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return 1
 			}
@@ -105,43 +107,39 @@ func cmdState(args []string) int {
 		if !need(1, "id") {
 			return 1
 		}
-		return set(map[int]string{1: "dispatched", 3: arg(rest, 4), 5: arg(rest, 2), 6: arg(rest, 3), 7: arg(rest, 1)},
+		return record(events.Event{Type: "dispatched", PID: arg(rest, 1), Worktree: arg(rest, 2), Branch: arg(rest, 3), Task: arg(rest, 4)},
 			"DISPATCHED "+id)
 
 	case "review":
 		if !need(2, "id and round") {
 			return 1
 		}
-		return set(map[int]string{1: "reviewing", 4: rest[1]}, "REVIEWING "+id)
+		return record(events.Event{Type: "review", Round: rest[1]}, "REVIEWING "+id)
 
 	case "verdict":
 		if !need(3, "id, round and verdict") {
 			return 1
 		}
-		v := rest[2]
-		kv := map[int]string{1: "handback", 4: rest[1], 8: arg(rest, 3), 9: "handback"}
-		if v == "pass" {
-			kv[1], kv[9] = "reviewing", "pass"
-		}
-		return set(kv, fmt.Sprintf("VERDICT %s %s", id, v))
+		return record(events.Event{Type: "verdict", Round: rest[1], Verdict: rest[2], Head: arg(rest, 3)},
+			fmt.Sprintf("VERDICT %s %s", id, rest[2]))
 
 	case "merged":
 		if !need(1, "id") {
 			return 1
 		}
-		return set(map[int]string{1: "merged", 10: arg(rest, 1)}, "MERGED "+id)
+		return record(events.Event{Type: "merged", SHA: arg(rest, 1)}, "MERGED "+id)
 
 	case "blocked":
 		if !need(1, "id") {
 			return 1
 		}
-		return set(map[int]string{1: "blocked"}, "BLOCKED "+id)
+		return record(events.Event{Type: "blocked"}, "BLOCKED "+id)
 
 	case "drop":
 		if !need(1, "id") {
 			return 1
 		}
-		return set(map[int]string{1: "dropped"}, "DROPPED "+id)
+		return record(events.Event{Type: "dropped"}, "DROPPED "+id)
 
 	case "list":
 		rows, _ := l.Rows()

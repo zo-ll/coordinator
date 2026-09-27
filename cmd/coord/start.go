@@ -61,10 +61,17 @@ func cmdStart(args []string) int {
 
 	// repo hygiene: workers use `git add -A`, so keep finish markers out of
 	// the index from the start — the first commit the coordinator authors.
+	// The event log and its lock are runtime state, never committed.
 	gi := filepath.Join(repo, ".gitignore")
-	if !hasLine(readTrim(gi), ".scratch/") {
-		appendLine(gi, ".scratch/")
-		hygieneCommit(repo, ".gitignore", "[coord] ignore .scratch markers")
+	changed := false
+	for _, pat := range []string{".scratch/", ".coordinator/events.jsonl*"} {
+		if !hasLine(readTrim(gi), pat) {
+			appendLine(gi, pat)
+			changed = true
+		}
+	}
+	if changed {
+		hygieneCommit(repo, ".gitignore", "[coord] ignore .scratch markers and the event log")
 	}
 
 	// claude grants permissions per process and per allowed directory, so

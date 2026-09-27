@@ -6,7 +6,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE="$HERE/../scripts/state.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-export COORD_LEDGER="$TMP/repo/.coordinator/ledger.tsv"
+export COORD_EVENTS="$TMP/repo/.coordinator/events.jsonl"
 export COORD_DASHBOARD="$TMP/repo/COORDINATION.md"
 
 assert() { [ "$1" = "$2" ] || { echo "  assert failed: '$1' != '$2'"; exit 1; }; }

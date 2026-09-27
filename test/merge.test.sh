@@ -11,7 +11,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 export COORD_ROOT="$TMP/coord"
 export COORD_CONFIG="$TMP/repo/.coordinator/config.conf"
-export COORD_LEDGER="$TMP/repo/.coordinator/ledger.tsv"
+export COORD_EVENTS="$TMP/repo/.coordinator/events.jsonl"
 export COORD_REPO="$TMP/repo"
 mkdir -p "$(dirname "$COORD_CONFIG")" "$COORD_ROOT"
 

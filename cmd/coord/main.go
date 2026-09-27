@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+
+	"github.com/zo-ll/coordinator/internal/events"
 )
 
 var commands = map[string]func([]string) int{
@@ -80,10 +82,39 @@ func envConf() string   { return env("COORD_ENV_CONF", filepath.Join(coordHome()
 func configPath() string {
 	return env("COORD_CONFIG", filepath.Join(cwd(), ".coordinator", "config.conf"))
 }
-func ledgerPath() string {
-	return env("COORD_LEDGER", filepath.Join(cwd(), ".coordinator", "ledger.tsv"))
+
+// eventsPath is the event log: $COORD_EVENTS, else the nearest
+// .coordinator/events.jsonl at or above the working directory (a worktree
+// under <repo>/.coordinator/worktrees finds its repo's log), else
+// ./.coordinator/events.jsonl.
+func eventsPath() string {
+	if p := existingEventsPath(); p != "" {
+		return p
+	}
+	return filepath.Join(cwd(), ".coordinator", "events.jsonl")
 }
-func repoDir() string { return env("COORD_REPO", cwd()) }
+
+// existingEventsPath is eventsPath without the fallback: "" when no log is
+// named or found.
+func existingEventsPath() string {
+	if p := os.Getenv("COORD_EVENTS"); p != "" {
+		if abs, err := filepath.Abs(p); err == nil {
+			return abs
+		}
+		return p
+	}
+	for d := cwd(); ; d = filepath.Dir(d) {
+		if p := filepath.Join(d, ".coordinator", "events.jsonl"); isFile(p) {
+			return p
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
+}
+
+func eventLog() events.Log { return events.Log{Path: eventsPath()} }
+func repoDir() string      { return env("COORD_REPO", cwd()) }
 
 // scriptsDir is where the shims live: set by the shim, else next to bin/.
 func scriptsDir() string {

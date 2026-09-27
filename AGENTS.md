@@ -1,7 +1,7 @@
 # coordinator
 
 Multi-agent orchestration protocol. See [SPEC.md](SPEC.md) (implemented) and
-[SPEC-v2.md](SPEC-v2.md) (draft; migration phase 1 done).
+[SPEC-v2.md](SPEC-v2.md) (draft; migration phases 1–2 done).
 
 ## Conventions
 
@@ -13,7 +13,10 @@ Multi-agent orchestration protocol. See [SPEC.md](SPEC.md) (implemented) and
 - Config and state are plain files; `coord` is the only parser.
 - No `python`, `node`, or `tmux` dependency in the core; Go is needed only to
   build.
-- Machine-local runtime state lives under `$COORD_ROOT` (default `/tmp/coordinator`).
+- Run state is one append-only log, `<repo>/.coordinator/events.jsonl`
+  (`$COORD_EVENTS`); the queue and the ledger are projections of it.
+  Machine-local runtime files (role logs, batches, the relay lock) live under
+  `$COORD_ROOT` (default `/tmp/coordinator`).
 
 ## Tests
 

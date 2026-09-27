@@ -1,4 +1,4 @@
-> A v2 draft (units, playbooks, evidence, event log, Go) is in [SPEC-v2.md](SPEC-v2.md). This file describes what the code implements today.
+> A v2 draft (units, playbooks, evidence, event log, Go) is in [SPEC-v2.md](SPEC-v2.md). This file describes what the code implements today, except storage: the queue and the ledger are now projections of one event log, `<repo>/.coordinator/events.jsonl` (SPEC-v2 migration phase 2).
 
 ## Problem Statement
 

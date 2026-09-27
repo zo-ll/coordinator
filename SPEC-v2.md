@@ -88,15 +88,20 @@ Linux and WSL only, as in v1.
 
 | Path | Contents | Writer |
 |---|---|---|
-| `<repo>/.coordinator/events.jsonl` | append-only event log, the source of truth | `coord` under `events.lock` |
-| `<repo>/.coordinator/cursor` | last seq delivered to the coordinator | the relay |
+| `<repo>/.coordinator/events.jsonl` | append-only event log, the source of truth, including delivery state | `coord` under `events.jsonl.lock` |
 | `<repo>/.coordinator/config.conf` | repo choices (v1 format, committed) | `coord apply` |
 | `<repo>/.coordinator/standing.md` | standing orders (committed) | the coordinator / user |
 | `<repo>/.coordinator/playbooks/*.md` | repo playbook overrides (committed) | the user |
 | `<repo>/.coordinator/session` | coordinator session id | `coord start` |
 | `$COORD_ROOT/log/`, `$COORD_ROOT/batch/` | role logs, batch files | `coord` |
 
-`events.jsonl`, `cursor`, and `session` are runtime state and gitignored.
+`events.jsonl` and `session` are runtime state and gitignored.
+
+The log is found as `$COORD_EVENTS`, else the nearest
+`.coordinator/events.jsonl` at or above the working directory, else
+`./.coordinator/events.jsonl`. Dispatch passes `COORD_EVENTS` to every role,
+in its environment and in the finish-contract line; `finish` never creates a
+log it was not pointed at.
 `COORDINATION.md` is generated. The v1 queue, ledger, and journal are gone:
 all three are views of the event log.
 
@@ -273,14 +278,15 @@ the same worktree; config values are still never executed.
 2. **Timebox.** For each such unit past `dispatched.ts + timebox_s`, send
    SIGTERM to its process group (launches run under `setsid`), wait 30s, send
    SIGKILL, append `died reason=timeout`.
-3. **Delivery.** If any wake event has `seq > cursor`, write them in order to a
+3. **Delivery.** If any wake event is undelivered, write them in order to a
    batch file (`EVENT <seq> <unit> <type> <one line>`, then the standing
-   orders), resume the coordinator with `WAKE batch=<path>` via the harness
-   resume recipe, wait for the turn to exit, then set `cursor` to the batch's
-   highest seq. One turn at a time.
+   orders) and append `claimed {batch, seqs}`; resume the coordinator with
+   `WAKE batch=<path>` via the harness resume recipe, wait for the turn to
+   exit, then append `acked`. One turn at a time.
 
-Delivery stays at-least-once: a relay crash before the cursor moves means the
-batch is delivered again. Resume retries and give-up behavior are v1's.
+Delivery stays at-least-once: a relay crash between `claimed` and `acked`
+leaves the batch claimed; on restart the relay appends `nacked` and
+delivers it again. Resume retries and give-up behavior are v1's.
 
 ### CLI
 
@@ -358,8 +364,11 @@ Callers first, then delete the old path.
 1. **Port 1:1.** *(done)* `coord` implements the v1 CLI contracts; `scripts/*.sh` become
    one-line shims (`exec coord <verb> "$@"`). Done when the v1 suite passes
    unchanged against the binary.
-2. **Event log.** Replace the queue, ledger, and journal with `events.jsonl`
-   behind the same commands. v1 suite still green.
+2. **Event log.** *(done)* Replace the queue, ledger, and journal with `events.jsonl`
+   behind the same commands. v1 suite still green. (Queue delivery is the
+   `enqueued`/`claimed`/`acked`/`nacked` events; tests that read queue files
+   now assert through `queue depth` and batch contents; `ENQUEUED` prints
+   `seq=<n>` instead of a file name.)
 3. **v2 model.** Add kinds, playbooks, evidence, engine-computed rounds and
    slugs, the timebox scheduler, and the v2 CLI. Update SKILL.md and the role
    preambles. Port the tests to the v2 CLI.

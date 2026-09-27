@@ -12,10 +12,12 @@ A harness-agnostic, script-driven, barebones multi-agent orchestration protocol.
 - `scripts/detect.sh` / `plan.sh` / `apply.sh` — boot: detect the environment,
   propose a config, ask only what detection cannot decide, validate, write.
 - `scripts/queue.sh` + `finish.sh` — finished work is a recovery marker plus an
-  ordered, de-duplicated ping.
+  ordered, de-duplicated ping in the run's event log
+  (`.coordinator/events.jsonl`), the single source of truth.
 - `scripts/relay.sh` — the serial consumer: batches everything pending and
   resumes the coordinator session via a config-driven command (`wake`).
-- `scripts/state.sh` — the slice ledger; `render` writes `COORDINATION.md`.
+- `scripts/state.sh` — the slice ledger (a projection of the event log);
+  `render` writes `COORDINATION.md`.
 - `scripts/worktree.sh`, `invoke.sh`, `spawn.sh` — dispatch a role detached.
 - `scripts/merge.sh` — HEAD-bound, approval-gated merge.
 - `scripts/coord.sh` — launcher: pins the session id and starts the relay.

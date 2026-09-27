@@ -23,14 +23,11 @@ func cmdStatus(args []string) int {
 	rpid := readTrim(filepath.Join(root, "relay.pid"))
 	fmt.Printf("STATUS relay=%s alive=%s\n", dash(rpid), bit(alive(rpid)))
 
-	q, err := queue.Open(root)
-	if err != nil {
-		return fail(1, "status: %v", err)
-	}
-	p, i, d := q.Depth()
+	log := eventLog()
+	p, i, d := queue.Queue{Log: log}.Depth()
 	fmt.Printf("QUEUE pending=%d inflight=%d done=%d\n", p, i, d)
 
-	rows, _ := ledger.Ledger{Path: ledgerPath()}.Rows()
+	rows, _ := ledger.Ledger{Log: log}.Rows()
 	for _, r := range rows {
 		id, st, pid := r.F(0), r.F(1), r.F(7)
 		a := alive(pid)

@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/zo-ll/coordinator/internal/cfg"
+	"github.com/zo-ll/coordinator/internal/events"
 	"github.com/zo-ll/coordinator/internal/ledger"
 )
 
@@ -98,12 +99,13 @@ func cmdSpawn(args []string) int {
 		sent.Write(orders)
 	}
 
-	l := ledger.Ledger{Path: ledgerPath()}
+	logPath := eventsPath()
+	l := ledger.Ledger{Log: events.Log{Path: logPath}}
 	finish := filepath.Join(scriptsDir(), "finish.sh")
 	fslug := ""
 	if slice != "" {
 		wslug := slice
-		rv, _ := l.Get(slice, 4)
+		rv, _ := l.Get(slice, ledger.FRound)
 		if n, err := strconv.Atoi(rv); err == nil && n > 1 {
 			wslug = fmt.Sprintf("%s.r%d", slice, n)
 		}
@@ -111,12 +113,12 @@ func cmdSpawn(args []string) int {
 		case "worker":
 			fslug = wslug
 			fmt.Fprintf(sent, "\nFINISH CONTRACT (do not skip; this is the completion protocol):\n"+
-				"%s --event %s --role worker --result done --head - --summary \"<one line>\"\n", finish, fslug)
+				"COORD_EVENTS=%s %s --event %s --role worker --result done --head - --summary \"<one line>\"\n", logPath, finish, fslug)
 		case "critic":
 			fslug = wslug + ".critic"
 			fmt.Fprintf(sent, "\nFINISH CONTRACT (do not skip; this is the completion protocol):\n"+
-				"%s --event %s --role critic --result <pass|handback> --head <hash>\n"+
-				"where <hash> = git diff HEAD | sha256sum | cut -d' ' -f1, run in this worktree.\n", finish, fslug)
+				"COORD_EVENTS=%s %s --event %s --role critic --result <pass|handback> --head <hash>\n"+
+				"where <hash> = git diff HEAD | sha256sum | cut -d' ' -f1, run in this worktree.\n", logPath, finish, fslug)
 		}
 	}
 	sentPath := prompt + ".sent"
@@ -146,7 +148,7 @@ func cmdSpawn(args []string) int {
 	}
 	logf := filepath.Join(logdir, name+".log")
 
-	pid, err := launch(config, role, wt, logf, argv)
+	pid, err := launch(config, role, wt, logf, logPath, argv)
 	if err != nil {
 		return fail(1, "spawn.sh: cannot launch %s: %v", argv[0], err)
 	}
@@ -155,7 +157,7 @@ func cmdSpawn(args []string) int {
 		// task = the finish slug this launch owes; the relay reports a DIED
 		// event when the pid is gone and that slug was never enqueued
 		branch, _ := git("-C", wt, "rev-parse", "--abbrev-ref", "HEAD")
-		l.Set(slice, map[int]string{1: "dispatched", 3: fslug, 5: wt, 6: branch, 7: pid})
+		l.Record(events.Event{Type: "dispatched", Unit: slice, PID: pid, Worktree: wt, Branch: branch, Task: fslug})
 	}
 	fmt.Printf("SPAWN %s slice=%s pid=%s wt=%s log=%s\n", role, orNone(slice), pid, wt, logf)
 	return 0
@@ -171,7 +173,10 @@ func orNone(s string) string {
 // launch runs argv through the first enabled adapter that accepts it
 // (adapters/<name>.sh defining adapter_launch <cwd> <log> <argv…> -> pid),
 // else detached under setsid with output appended to logf.
-func launch(config, role, wt, logf string, argv []string) (string, error) {
+func launch(config, role, wt, logf, logPath string, argv []string) (string, error) {
+	// the role finds the run's log through its environment (and the finish
+	// contract names it too, for launchers that do not pass the environment)
+	roleEnv := append(os.Environ(), "COORD_EVENTS="+logPath)
 	adapters := env("COORD_ADAPTERS", filepath.Join(filepath.Dir(scriptsDir()), "adapters"))
 	list := strings.FieldsFunc(cfg.Value(config, "adapters"), func(r rune) bool { return r == ',' || r == ' ' || r == '\t' })
 	for _, name := range list {
@@ -183,7 +188,7 @@ func launch(config, role, wt, logf string, argv []string) (string, error) {
 			continue
 		}
 		c := exec.Command("bash", append([]string{"-c", `set -uo pipefail; . "$1"; shift; adapter_launch "$@"`, "coord-adapter", a, wt, logf}, argv...)...)
-		c.Env = append(os.Environ(), "ADAPTER_NAME="+role)
+		c.Env = append(roleEnv, "ADAPTER_NAME="+role)
 		c.Stderr = os.Stderr
 		out, err := c.Output()
 		if err == nil {
@@ -198,6 +203,7 @@ func launch(config, role, wt, logf string, argv []string) (string, error) {
 	defer f.Close()
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Dir = wt
+	c.Env = roleEnv
 	c.Stdout, c.Stderr = f, f
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := c.Start(); err != nil {

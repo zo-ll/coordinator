@@ -9,6 +9,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 export COORD_ROOT="$TMP/coord"
+export COORD_EVENTS="$TMP/events.jsonl"
 export COORD_SESSION="sess-1"
 export RELAY_LOG="$TMP/resume.log"
 : > "$RELAY_LOG"
@@ -41,7 +42,7 @@ assert "$(grep -c '^EVENT ' "$batch")" "20"
 
 # acknowledged: nothing pending, everything in done
 assert "$("$QUEUE" list | wc -l)" "0"
-assert "$(ls "$COORD_ROOT/queue/.done" | wc -l)" "20"
+assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=20"
 
 # --- permanent failure: bounded retries, loud give-up, events kept in .inflight
 cat > "$TMP/fail-resume" <<'EOF'
@@ -102,15 +103,13 @@ assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=26"
 
 # --- a crash-stranded batch in .inflight is reclaimed at relay startup ---
 export COORD_RESUME="$TMP/fake-resume|__SESSION__|__BATCH__"
-out="$("$QUEUE" enqueue str1 'DONE str1: done')"
-ping="${out##* }"
-mv "$COORD_ROOT/queue/$ping" "$COORD_ROOT/queue/.inflight/"
+"$QUEUE" enqueue str1 'DONE str1: done' >/dev/null
+"$QUEUE" pop-batch "$TMP/crashed-batch" >/dev/null   # claimed, never acked
 assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=1 done=26"
 "$RELAY" --once --interval 0.2
 assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=27"
 
 # --- liveness: a dispatched pid that exited without finishing -> DIED event
-export COORD_LEDGER="$TMP/ledger.tsv"
 export COORD_STANDING="$TMP/standing.md"
 STATE="$HERE/../scripts/state.sh"
 bash -c 'exit 0' & dead=$!; wait "$dead"

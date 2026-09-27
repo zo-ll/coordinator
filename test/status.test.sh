@@ -9,7 +9,7 @@ QUEUE="$HERE/../scripts/queue.sh"
 TMP="$(mktemp -d)"
 
 export COORD_ROOT="$TMP/coord"
-export COORD_LEDGER="$TMP/repo/.coordinator/ledger.tsv"
+export COORD_EVENTS="$TMP/repo/.coordinator/events.jsonl"
 export COORD_DASHBOARD="$TMP/repo/COORDINATION.md"
 
 # a live process to stand in for a dispatched worker
