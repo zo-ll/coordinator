@@ -491,7 +491,7 @@ verify_failed() { # <id> <command> <exit> <log> <why>
 
 #   merge <id>  -> MERGED <id> sha=<sha> (local merge only)
 cmd_merge() {
-  local id=${1:-} base cur hash after secs vlog code cmd sha
+  local id=${1:-} base cur hash secs vlog code cmd sha changed
   [ -n "$id" ] || { fail 2 'merge: <id> is required'; return; }
   unit_row "$id" || { refuse "$id" merged "unknown unit"; return; }
   if ! { [ "$U_STATE" = approved ] || { [ "$U_STATE" = passed ] && [ "$(cfg_val "$CONFIG" autonomy)" = auto-merge ]; }; }; then
@@ -504,6 +504,14 @@ cmd_merge() {
   hash=$(state_hash "$U_WT") || { refuse "$id" merged "cannot hash $U_WT"; return; }
   [ "$hash" = "$U_PASS" ] || { refuse "$id" merged "reviewed state $U_PASS != current $hash (re-review required)"; return; }
 
+  # commit the reviewed state first: VERIFY runs on it, and the commit, not
+  # whatever VERIFY leaves behind, is what merges
+  identity "$REPO"
+  git -C "$U_WT" add -A -- . ':(exclude).scratch' >&2 || { refuse "$id" merged "cannot stage the reviewed state in $U_WT"; return; }
+  git -C "$U_WT" -c user.email="$ID_EMAIL" -c user.name="$ID_NAME" commit -q -m "[coord] $U_GOAL" >&2 || {
+    refuse "$id" merged "commit failed in $U_WT (nothing to commit?)"; return; }
+  uncommit() { git -C "$U_WT" reset -q --soft HEAD~1 || true; }
+
   # VERIFY, re-run by the engine on the reviewed state
   secs=$(dur "$(cfg_val "$CONFIG" verify.timeout)" 2>/dev/null) || secs=600
   vlog="$RUN/log/$id.verify.log"
@@ -511,15 +519,18 @@ cmd_merge() {
   while IFS= read -r cmd; do
     [ -n "$cmd" ] || continue
     code=0; run_verify "$U_WT" "$cmd" "$vlog" "$secs" || code=$?
-    if [ "$code" != 0 ]; then verify_failed "$id" "$cmd" "$code" "$vlog" "verify failed: $cmd (exit $code)"; return; fi
+    if [ "$code" != 0 ]; then uncommit; verify_failed "$id" "$cmd" "$code" "$vlog" "verify failed: $cmd (exit $code)"; return; fi
   done < <( [ -r "$U_BRIEF" ] && brief "$U_BRIEF" verify )
-  after=$(state_hash "$U_WT") || after=""
-  [ "$after" = "$hash" ] || { verify_failed "$id" "(verify modified the worktree)" 0 "$vlog" "verify modified the worktree"; return; }
+  # new files VERIFY made (bytecode, coverage) were never reviewed: drop them;
+  # a VERIFY that changed reviewed files tested something else: refuse
+  changed=$(git -C "$U_WT" status --porcelain --untracked-files=no | cut -c4- | paste -sd' ' -)
+  if [ -n "$changed" ]; then
+    git -C "$U_WT" checkout -q -- . 2>/dev/null || true
+    uncommit
+    verify_failed "$id" "(verify modified reviewed files: $changed)" 0 "$vlog" "verify modified reviewed files: $changed"; return
+  fi
+  git -C "$U_WT" clean -fdq -e .scratch >/dev/null 2>&1 || true
 
-  identity "$REPO"
-  git -C "$U_WT" add -A -- . ':(exclude).scratch' >&2 || { refuse "$id" merged "cannot stage the reviewed state in $U_WT"; return; }
-  git -C "$U_WT" -c user.email="$ID_EMAIL" -c user.name="$ID_NAME" commit -q -m "[coord] $U_GOAL" >&2 || {
-    refuse "$id" merged "commit failed in $U_WT (nothing to commit?)"; return; }
   if ! git -c user.email="$ID_EMAIL" -c user.name="$ID_NAME" -C "$REPO" merge --no-ff --no-edit "$U_BRANCH" >/dev/null 2>&1; then
     git -C "$REPO" merge --abort >/dev/null 2>&1 || true
     git -C "$U_WT" reset -q --soft HEAD~1 || true
@@ -661,7 +672,7 @@ next_steps() {
       s = $2
       if (s == "built") a = "coord dispatch " id " --role critic"
       else if (s == "passed" && auto) a = "coord merge " id
-      else if (s == "passed") a = "ASK THE USER to approve " id "; on yes: coord approve " id " && coord merge " id
+      else if (s == "passed") a = "ASK THE USER to approve " id " round " $4 " (an approval of an earlier round does not carry over); on yes: coord approve " id " && coord merge " id
       else if (s == "approved") a = "coord merge " id
       else if (s == "handback") a = "write a correction: coord brief " id ", fill in its CORRECTION from the reason above, then: coord dispatch " id " --role worker"
       else if (s == "stalled" && $5 == "worker") a = "coord dispatch " id " --role worker"

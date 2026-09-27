@@ -49,12 +49,26 @@ refuses 'REFUSED m3 merged: verify failed: test "$(wc -l < file.txt)" -gt 99 (ex
 assert "$(state_of m3)" "handback"
 has "$("$COORD" log m3)" "verify_failed m3"
 
-# --- VERIFY that modifies the worktree ---
-printf 'GOAL: g\nSCOPE: s\nACCEPTANCE: a\nVERIFY:\n  $ echo out > build.out\n' > "$TMP/dirty"
-to_passed m4 "$TMP/dirty"
+# the failed merge left no commit behind
+hasnt "$(git -C "$(wt m3)" log -1 --format=%s)" "[coord]"
+
+# --- VERIFY that leaves new files (bytecode, reports): dropped, merge goes on ---
+printf 'GOAL: g\nSCOPE: s\nACCEPTANCE: a\nVERIFY:\n  $ mkdir -p __pycache__ && echo x > __pycache__/m.pyc\n' > "$TMP/litter"
+to_passed m4 "$TMP/litter"
 "$COORD" approve m4 >/dev/null
-refuses "verify modified the worktree" "$COORD" merge m4
-assert "$(state_of m4)" "handback"
+has "$("$COORD" merge m4)" "MERGED m4"
+if git -C "$REPO" show --name-only --format= HEAD^2 | grep -q __pycache__; then echo "  verify output was merged"; exit 1; fi
+[ ! -e "$(wt m4)/__pycache__" ] || { echo "  verify output left in the worktree"; exit 1; }
+
+# --- VERIFY that edits a reviewed file tested something else: refused ---
+printf 'GOAL: g\nSCOPE: s\nACCEPTANCE: a\nVERIFY:\n  $ echo reformatted >> file.txt\n' > "$TMP/edits"
+to_passed m6 "$TMP/edits"
+"$COORD" approve m6 >/dev/null
+reviewed="$(cat "$(wt m6)/file.txt")"
+refuses "verify modified reviewed files: file.txt" "$COORD" merge m6
+assert "$(state_of m6)" "handback"
+assert "$(cat "$(wt m6)/file.txt")" "$reviewed"
+hasnt "$(git -C "$(wt m6)" log -1 --format=%s)" "[coord]"
 
 # --- auto-merge needs no approval; repo must be on the base ---
 printf 'autonomy=auto-merge\n' >> "$REPO/.coordinator/config.conf"

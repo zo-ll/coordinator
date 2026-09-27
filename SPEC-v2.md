@@ -276,20 +276,26 @@ itself (see Merge). A pass whose tests do not actually pass never merges.
 
 1. Recorded user approval (or `autonomy=auto-merge`).
 2. The repo is on the base branch, and the worktree state hash = the recorded `state`.
-3. Each `$ ` command from the brief's `VERIFY`, in order, run with `bash -c` in
+3. Stage the reviewed state and commit it with the user's identity on
+   `coord/<id>`. From here the commit, not the worktree, is what merges.
+4. Each `$ ` command from the brief's `VERIFY`, in order, run with `bash -c` in
    the worktree, output to `.coordinator/log/<id>.verify.log`, each bounded by
-   `verify.timeout` (config, default 10m). A nonzero exit or timeout appends
-   `verify_failed` (the unit goes to `handback`) and prints
+   `verify.timeout` (config, default 10m). A nonzero exit or timeout undoes the
+   commit, appends `verify_failed` (the unit goes to `handback`), and prints
    `REFUSED <id> merge: verify failed: <command> (exit <n>)`.
-4. State hash recomputed: a VERIFY command that changed the tracked or
-   untracked non-ignored files refuses the merge (`verify modified the
-   worktree`, recorded as `verify_failed`), since the merged state must be the
-   reviewed one.
-5. Stage the reviewed state and commit it with the user's identity, merge
-   `coord/<id>` with `--no-ff`, then append `merged`. Publishing is a separate
-   `git push` decision. On conflict, abort the merge, undo the commit, and
-   append `rejected` (by engine), returning the unit to `handback` for a
+5. New untracked files VERIFY created (bytecode, coverage, build output) were
+   never reviewed and are removed. A VERIFY that changed a committed file tested
+   something other than the reviewed state: the change is reverted, the commit
+   undone, and the merge refused (`verify modified reviewed files: <paths>`,
+   recorded as `verify_failed`). Gitignored files, such as installed
+   dependencies, are left alone throughout.
+6. Merge `coord/<id>` with `--no-ff`, then append `merged`. Publishing is a
+   separate `git push` decision. On conflict, abort the merge, undo the commit,
+   and append `rejected` (by engine), returning the unit to `handback` for a
    correction round.
+
+An approval covers one reviewed round: a unit that goes back to `handback`
+needs the user's approval again once it passes, and the batch's `NEXT` says so.
 
 This is the one place the engine executes brief content. The commands are ones
 the coordinator wrote and the worker has already run with full permissions in
@@ -530,6 +536,12 @@ Made during implementation (2026-09-27):
     per-repo settings. Skills attach per role only, and reach the agent as a
     SKILL.md path in its prompt rather than through any harness's own skill
     loading.
+
+15. **VERIFY runs on a commit of the reviewed state.** Files VERIFY creates are
+    dropped instead of blocking the merge (a Python test run leaves
+    `__pycache__`); edits to reviewed files still refuse it. VERIFY stays in
+    the worker's worktree, not a fresh checkout, so gitignored dependencies
+    remain available to it.
 
 ## Open Questions
 

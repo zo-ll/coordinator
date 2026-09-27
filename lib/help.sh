@@ -130,9 +130,10 @@ EOF
     merge) cat <<'EOF'
 coord merge <id>
   -> MERGED <id> sha=<sha>, then READY <ids> and DONE when they apply
-  Needs a recorded approval (or autonomy=auto-merge) and the exact reviewed
-  state; re-runs the brief's VERIFY, commits with the user's identity, and
-  merges locally. Pushing is a separate decision.
+  Needs a recorded approval of this round (or autonomy=auto-merge) and the
+  exact reviewed state. Commits it with the user's identity, re-runs the
+  brief's VERIFY on it (new files VERIFY makes are dropped; edits to reviewed
+  files refuse), and merges locally. Pushing is a separate decision.
 EOF
     ;;
     status) cat <<'EOF'

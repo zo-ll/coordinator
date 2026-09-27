@@ -25,7 +25,7 @@ assert "$(line "$b" READY)" ""
 # critic pass -> ask the user (never a bare approve); approved -> merge
 "$COORD" dispatch a --role critic >/dev/null
 wave 1
-assert "$(line "$(last_batch)" "NEXT a:")" "NEXT a: ASK THE USER to approve a; on yes: coord approve a && coord merge a"
+assert "$(line "$(last_batch)" "NEXT a:")" "NEXT a: ASK THE USER to approve a round 1 (an approval of an earlier round does not carry over); on yes: coord approve a && coord merge a"
 "$COORD" approve a >/dev/null
 wave 1
 assert "$(line "$(last_batch)" "NEXT a:")" "NEXT a: coord merge a"

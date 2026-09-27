@@ -52,7 +52,8 @@ The relay resumes you with `WAKE batch=<path>`. Read the file: events, then
 one `NEXT` per unit, then `READY`, `DONE`, and open `GATES`. Do what each
 line says, dispatch everything under READY, and end your turn. On `DONE`,
 report what shipped and stop. A NEXT that says ASK THE USER means exactly
-that: never run `approve` without their yes.
+that: never run `approve` without their yes to that round. A yes covers the
+reviewed state they were asked about; after a new round, ask again.
 
 ## Decisions
 
