@@ -32,6 +32,10 @@ installed agent harness (codex, claude, pi, opencode, …) is enough.
 - **Relay.** `coord relay` wakes the coordinator with one batch per wave of
   events, reports dead launches, kills launches past their timebox, and blocks
   a unit that dies twice in a round.
+- **Shapes.** `shapes/` holds light recipes the coordinator picks from: swarm
+  (parallel units), arena (competing attempts, a judge picks one), interrogate
+  (extra reviewers on risky units). Small jobs skip the ceremony, and
+  reversible questions become gates with a default instead of blocking.
 - `SKILL.md` is what the coordinator agent loads; `agents/` are the role
   preambles; `adapters/` are optional launch overrides (tmux).
 

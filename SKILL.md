@@ -38,8 +38,39 @@ only content reviewer: you never read a worker's diff. Every command below is
 4. `bin/coord start` → `SESSION … source=…` + `RELAY …`; sets up
    `.coordinator/` and starts the relay detached. If it fails, no fake ids are
    invented — pass `--session <the-harness-real-session-id>`.
-5. Add the units (below), dispatch every id `bin/coord unit next` prints, and
-   end your turn. The relay drives every turn after this.
+5. Size the job and pick a shape (below), add the units, dispatch every id
+   `bin/coord unit next` prints, and end your turn. The relay drives every
+   turn after this.
+
+## Size the job
+
+Ceremony scales with the work. Before cutting anything, decide which of these
+the request is:
+
+- **Small job**: one area, one acceptance, done by one worker in under an hour
+  (a bug, a flag, a doc fix, a small feature). Add **one** unit with the
+  fitting kind, dispatch it, and say so in one line. No decomposition, no
+  shape, no plan to present. It still gets a critic and the user's approval;
+  those are the engine's rules, not ceremony.
+- **Program**: several parts, or parts that depend on each other. Cut it into
+  units and pick a shape.
+
+When in doubt, start small: a small job that turns out bigger comes back as a
+worker's `partial`, and you cut it then.
+
+## Shapes
+
+A shape is how a group of units works together. Pick the one that fits, read
+its file in `shapes/` (next to this skill), and follow it:
+
+- `shapes/swarm.md`: independent units in parallel. The default for programs.
+- `shapes/arena.md`: the same unit attempted two or three times; a judge
+  picks the best, the rest are dropped. For a design other work builds on.
+- `shapes/interrogate.md`: extra reviewers on a passed, risky unit before the
+  user approves it. For changes where a miss is expensive.
+
+Shapes combine: a program can swarm most units, arena its core API, and
+interrogate its migration. Name the shape you picked in your report.
 
 ## Units
 
@@ -107,7 +138,9 @@ resumed turn, read the batch file and route each line
   engine blocks the unit itself.
 - `blocked` (by the engine) → tell the user; `bin/coord reopen <unit> --reason …`
   once the cause is fixed.
-- `finished` … researcher → read the report, route the decision to the user.
+- `finished` … researcher → read the report. If it is an arena judge or an
+  interrogation reviewer, continue that shape's steps; otherwise route the
+  decision to the user (or record it as a gate, below).
 - `approved` → `bin/coord merge <unit>`. `msg` → act on the text.
 
 Then dispatch every id `bin/coord unit next` prints. When `bin/coord done`
@@ -123,6 +156,29 @@ never doubled.
 `bin/coord block|reopen|drop <unit> --reason "…"`. Block and drop stop the
 unit's live launch. Merge never happens without a recorded approval unless the
 user chose `autonomy=auto-merge`.
+
+## Gates: don't block on reversible choices
+
+When you need a decision the brief and the repo don't settle (a naming
+choice, which of two libraries, whether an edge case is in scope), don't stop
+and wait. If the choice can be undone later, it's a **gate**:
+
+1. Append it to `.coordinator/gates.md`:
+   ```
+   ## G3  which retry library?
+   options: backoff (small, maintained) · hand-rolled (no dependency)
+   default: hand-rolled, going with it now
+   status: open
+   ```
+2. Carry on with the default in this turn.
+3. List every open gate in your next report to the user, together, not one
+   question per turn. The user answers in chat or with
+   `bin/coord msg - "G3: backoff"`; mark the gate `decided` and, if the answer
+   differs from the default, fix course with a correction brief or a new unit.
+
+**Irreversible choices wait for the user**: dropping a unit (drop is final),
+anything that deletes data or history, pushing somewhere new, and every merge
+(the engine already requires approval). Everything else proceeds.
 
 ## Observe (do not improvise)
 
