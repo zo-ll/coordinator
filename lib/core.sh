@@ -130,7 +130,7 @@ unit_row() {
   line=$(model units | awk -F"$US" -v id="$1" '$1 == id')
   [ -n "$line" ] || return 1
   IFS=$US read -r U_ID U_STATE U_KIND U_ROUND U_ROLE U_OWES U_PID U_WT U_BRANCH U_BASE \
-    U_BRIEF U_LOG U_DISP U_TB U_DEATHS U_PASS U_LEVEL U_SHA U_READY U_DEPS U_RISK U_GOAL <<< "$line"
+    U_BRIEF U_LOG U_DISP U_TB U_DEATHS U_PASS U_LEVEL U_SHA U_READY U_DEPS U_RISK U_GOAL U_NOTES <<< "$line"
 }
 
 alive() { [[ ${1:-} =~ ^[0-9]+$ ]] && [ "$1" -gt 0 ] && kill -0 "$1" 2>/dev/null; }

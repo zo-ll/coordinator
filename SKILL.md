@@ -34,7 +34,10 @@ terminal.
   tells you to cut it further.
 - **Program**: several units. By default run independent units in parallel,
   with exclusive SCOPE, `--deps` only where one needs another's output, and
-  one report when the wave is done. Read a shape file when one fits:
+  one report when the wave is done. A file several units would all edit (a
+  package `__init__`, a registry, a changelog) belongs to one unit: give it
+  to the unit the others depend on, or to a final unit, so parallel merges
+  don't conflict. Read a shape file when one fits:
   `shapes/arena.md` (competing attempts at a design others build on),
   `shapes/interrogate.md` (extra reviewers on a risky unit). Name the shape in
   your report.
@@ -55,9 +58,11 @@ repeating an instruction, make it `bin/coord standing add`.
 The relay resumes you with `WAKE batch=<path>`. Read the file: events, then
 one `NEXT` per unit, then `READY`, `DONE`, and open `GATES`. Do what each
 line says, dispatch everything under READY, and end your turn. On `DONE`,
-report what shipped and stop. A NEXT that says ASK THE USER means exactly
-that: never run `approve` without their yes to that round. A yes covers the
-reviewed state they were asked about; after a new round, ask again.
+report what shipped and stop. A clean pass merges on its own; a pass the
+critic left notes on, or a risky unit's, waits for the user. A NEXT that says
+ASK THE USER means exactly that: never run `approve` without their yes to
+that round. A yes covers the reviewed state they were asked about; after a
+new round, ask again.
 
 ## Decisions
 
@@ -65,7 +70,7 @@ Don't block on a choice the brief and repo don't settle if it can be undone
 later: `bin/coord gate add "<question>" --default <choice>`, go ahead on the
 default, and list open gates together in your next report. Irreversible
 choices always wait for the user: dropping a unit, deleting data or history,
-pushing, and every merge unless they chose `autonomy=auto-merge`.
+pushing, and merging anything the engine says needs their approval.
 
 ## Helpers
 
@@ -79,6 +84,8 @@ critics always go through `bin/coord dispatch`.
 
 - Read a worker's diff: the critic is the only content reviewer.
 - Write a slug, a round, or a critic brief, or commit for a worker.
+- Answer the user with `bin/coord msg`: that is their channel to you, and it
+  wakes you again. Answer in your own window.
 - `tail` logs, `ps` for agents, or open `.coordinator/` files other than the
   draft `bin/coord brief` prints: `bin/coord status` and `bin/coord log` are
   the views.

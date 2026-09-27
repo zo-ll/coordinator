@@ -39,12 +39,21 @@ b="$(last_batch)"
 assert "$(line "$b" "NEXT a:")" "NEXT a: nothing (merged)"
 assert "$(line "$b" READY)" "READY z: for each, coord brief <id>, fill in the file it prints, then: coord dispatch <id> --role worker"
 
-# under auto-merge a pass merges directly
+# under auto-merge a clean pass merges itself, and the merge wakes the coordinator
 printf 'autonomy=auto-merge\n' >> "$REPO/.coordinator/config.conf"
 "$COORD" dispatch z --role worker --brief "$TMP/brief" >/dev/null; wave 1
-"$COORD" dispatch z --role critic >/dev/null; wave 1
-assert "$(line "$(last_batch)" "NEXT z:")" "NEXT z: coord merge z"
-"$COORD" merge z >/dev/null
+"$COORD" dispatch z --role critic >/dev/null
+wait_for is_state z merged
+wave 1
+has "$(last_batch)" "z merged sha="
+assert "$(line "$(last_batch)" "NEXT z:")" "NEXT z: nothing (merged)"
+
+# a pass with notes asks the user, showing the notes
+"$COORD" unit add n1 --kind chore --goal n1 >/dev/null
+"$COORD" dispatch n1 --role worker --brief "$TMP/brief" >/dev/null; wave 1
+FAKE_CRITIC=notepass "$COORD" dispatch n1 --role critic >/dev/null; wave 1
+has "$(line "$(last_batch)" "NEXT n1:")" "ASK THE USER to approve n1 round 1, showing the critic's notes: check the migration"
+"$COORD" drop n1 --reason x >/dev/null
 
 # died -> same role again; twice -> blocked -> tell the user
 FAKE_WORKER=exit "$COORD" dispatch p --role worker --brief "$TMP/brief" >/dev/null

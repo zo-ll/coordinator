@@ -53,7 +53,7 @@ assert "$(printf '%s\n' "$out" | sed -E 's/current=[^ ]+ //')" \
   "DETECT installed=codex spawnable=codex"
 out="$(PATH="$TMP/bin" coord_plan)"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
-  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge"
+  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=auto-merge"
 assert "$(printf '%s\n' "$out" | sed -n 2p)" "ASK"
 printf '%s\n' "$out" | grep -qx '  critic.model=' || { echo "  ASK missing critic.model"; exit 1; }
 if printf '%s\n' "$out" | grep -q '  critic.harness='; then echo "  roles should be forced"; exit 1; fi
@@ -74,7 +74,7 @@ fresh two
 PATH="$TMP/bin" coord_detect >/dev/null
 out="$(PATH="$TMP/bin" coord_plan)"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
-  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge"
+  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=auto-merge"
 case "$(printf '%s\n' "$out" | tail -n +2)" in
   *critic.harness=codex*lane.strong.harness=claude*) ;;
   *) echo "  multi-harness ASK missing roles"; exit 1 ;;

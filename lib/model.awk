@@ -62,7 +62,8 @@ function owner(s,   id) {
 
 function wake(t) {
     return t == "finished" || t == "converted" || t == "died" || t == "approved" || \
-           t == "rejected" || t == "msg" || t == "verify_failed" || (t == "blocked" && E["by"] == "engine")
+           t == "rejected" || t == "msg" || t == "verify_failed" || (t == "blocked" && E["by"] == "engine") || \
+           (t == "merged" && E["by"] == "auto")
 }
 
 function q(s) { return "\"" s "\"" }
@@ -120,7 +121,7 @@ function apply(   t, u, id, r, want, n, i, a, s, ns) {
         else if (ROLE[id] == "critic" && E["result"] == "handback") ns = "handback"
         else return ROLE[id] " result " q(E["result"])
         ST[id] = ns
-        if (ns == "passed") { PASS[id] = E["state"]; EVL[id] = E["level"] }
+        if (ns == "passed") { PASS[id] = E["state"]; EVL[id] = E["level"]; NOTE[id] = E["notes"] }
         OWES[id] = ""; FIN[s] = 1
         return ""
     }
@@ -159,13 +160,13 @@ function apply(   t, u, id, r, want, n, i, a, s, ns) {
     if (!(u in ST)) return "unknown unit " q(u)
     if (t == "converted") {
         if (ST[u] != "passed") return "cannot convert from " ST[u]
-        ST[u] = "handback"; PASS[u] = ""; EVL[u] = ""
+        ST[u] = "handback"; PASS[u] = ""; EVL[u] = ""; NOTE[u] = ""
     } else if (t == "approved") {
         if (ST[u] != "passed") return "cannot approve from " ST[u]
         ST[u] = "approved"
     } else if (t == "rejected" || t == "verify_failed") {
         if (ST[u] != "passed" && ST[u] != "approved") return t " not allowed from " ST[u]
-        ST[u] = "handback"; PASS[u] = ""; EVL[u] = ""
+        ST[u] = "handback"; PASS[u] = ""; EVL[u] = ""; NOTE[u] = ""
     } else if (t == "merged") {
         if (ST[u] != "passed" && ST[u] != "approved") return "cannot merge from " ST[u]
         ST[u] = "merged"; SHA[u] = E["sha"]
@@ -233,7 +234,7 @@ END {
             u = ORDER[i]
             print u US ST[u] US KIND[u] US ROUND[u] US ROLE[u] US OWES[u] US PID[u] US WT[u] US BR[u] US \
                   BASE[u] US WBRIEF[u] US LOGF[u] US DISP[u] US TB[u] US (DEATHS[u, ROUND[u]] + 0) US \
-                  PASS[u] US EVL[u] US SHA[u] US isready(u) US DEPS[u] US RISK[u] US GOAL[u]
+                  PASS[u] US EVL[u] US SHA[u] US isready(u) US DEPS[u] US RISK[u] US GOAL[u] US NOTE[u]
         }
         exit
     }

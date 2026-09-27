@@ -63,6 +63,7 @@ case "$act" in
             exec "$COORD" finish --result done --summary "did it" ;;
   partial)  exec "$COORD" finish --result partial --summary "half done" ;;
   pass)     exec "$COORD" finish --result pass --evidence tests --ran "test -f file.txt" --summary "looks right" ;;
+  notepass) exec "$COORD" finish --result pass --evidence tests --ran "test -f file.txt" --note "check the migration" --summary "works, one risk" ;;
   weakpass) exec "$COORD" finish --result pass --evidence typecheck --ran "true" --summary "compiles" ;;
   handback) exec "$COORD" finish --result handback --summary "needs tests" ;;
   report)   report="$(printf '%s\n' "$prompt" | sed -n 's/^Write your decision brief to \(.*\), then:$/\1/p')"

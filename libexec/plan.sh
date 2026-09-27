@@ -60,7 +60,7 @@ if [ -n "$lane_strong" ]; then
   "$CFG" set "$PROPOSAL" lane.strong.harness "$lane_strong"
   "$CFG" set "$PROPOSAL" lane.strong.model ""
 fi
-"$CFG" set "$PROPOSAL" autonomy approve-merge
+"$CFG" set "$PROPOSAL" autonomy auto-merge
 
 # ASK block: concrete keys with proposed values, so the coordinator can present
 # a real question. Empty model value = "harness default" (the user must confirm).
@@ -71,7 +71,7 @@ if [ "${#sp[@]}" -gt 1 ]; then
 fi
 ask+=("critic.model=" "researcher.model=" "lane.default.model=")
 [ -n "$lane_strong" ] && ask+=("lane.strong.model=")
-ask+=("autonomy=approve-merge")
+ask+=("autonomy=auto-merge")
 
 # the user's own defaults (coord role --global) are already decided: leave
 # the repo key empty so they apply, and don't ask about them
@@ -93,7 +93,7 @@ for k in critic.harness critic.model researcher.harness researcher.model \
   ask=("${keep[@]}")
 done
 
-printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=approve-merge\n' \
+printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=auto-merge\n' \
   "$critic" "$researcher" "$lane_default" "${lane_strong:-none}"
 printf 'ASK\n'
 for l in "${ask[@]}"; do printf '  %s\n' "$l"; done

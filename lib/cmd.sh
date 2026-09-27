@@ -277,7 +277,10 @@ finish_contract() {
     critic)
       printf '%s --result pass|handback --evidence <%s> --ran "<command>" [--ran "<command>"]...' "$call" "${LEVELS// /|}"
       for f in $PB_NEED; do printf ' --flag %s' "$f"; done
-      printf ' --summary "<one line>"\n'
+      printf ' [--note "<for the user>"]... --summary "<one line>"\n'
+      printf 'A pass with no --note merges on its own. Add a --note for anything the user should\n'
+      printf 'see before it merges (a risk, a judgment call, something you could not check);\n'
+      printf 'a pass with notes waits for their approval. Style nits are not notes.\n'
       printf 'Evidence is the strongest level you proved yourself (%s). This unit needs at\n' "${LEVELS// / < }"
       printf 'least %s' "$PB_FLOOR"
       [ "$PB_FLOOR" = none ] || printf ', with every command you ran as --ran'
@@ -442,12 +445,14 @@ shortfall() {
   printf '%s' "$why"
 }
 
-#   finish --result <r> [--evidence <l>] [--ran "<cmd>"]... [--flag <f>]... --summary "<s>" [--slug <s>]
+#   finish --result <r> [--evidence <l>] [--ran "<cmd>"]... [--flag <f>]... [--note "<n>"]... --summary "<s>" [--slug <s>]
 #     -> FINISHED <slug> -> <state> | DUP <slug>
+# A critic's clean pass (no --note) merges on its own under autonomy=auto-merge.
 cmd_finish() {
-  parse_args finish "result evidence summary slug" "ran flag" "" "$@"
+  parse_args finish "result evidence summary slug" "ran flag note" "" "$@"
   local slug=${F[slug]:-${COORD_OWES:-}} result=${F[result]:-} level=${F[evidence]:-} summary=${F[summary]:-}
-  local ran=${FM[ran]:-} flags=${FM[flag]:-} o kind id="" role="" report="" state="" conv="" r
+  local ran=${FM[ran]:-} flags=${FM[flag]:-} notes o kind id="" role="" report="" state="" conv="" r
+  notes=$(sed '/^$/d' <<< "${FM[note]:-}" | paste -sd'|' - | sed 's/|/ | /g')
   [ -n "$slug" ] && [ -n "$result" ] || { fail 2 'finish: --result and the owed slug (--slug or COORD_OWES) are required'; return; }
   existing_events_path >/dev/null || { fail 1 'finish: no event log (set COORD_EVENTS, or run inside the repo or its worktrees)'; return; }
   o=$(model owner -v slug="$slug")
@@ -478,6 +483,7 @@ cmd_finish() {
     while IFS= read -r x; do [ -n "$x" ] && args+=(ran="$x"); done <<< "$ran"
     while IFS= read -r x; do [ -n "$x" ] && args+=(flags="$x"); done <<< "$flags"
     args+=(summary="$summary")
+    [ -n "$state" ] && [ -n "$notes" ] && args+=(notes="$notes")
     [ -n "$report" ] && args+=(report="$report")
     ev "${args[@]}"
     [ -z "$conv" ] || ev type=converted unit="$id" slug="$slug" from=pass to=handback reason="$conv"
@@ -487,8 +493,21 @@ cmd_finish() {
   [ "$r" = 0 ] || return "$r"
   if [ "$role" = researcher ]; then echo "FINISHED $slug report=$report"
   elif [ -n "$conv" ]; then echo "FINISHED $slug -> handback (converted: $conv)"
-  else unit_row "$id"; echo "FINISHED $slug -> $U_STATE"
+  else
+    unit_row "$id"; echo "FINISHED $slug -> $U_STATE"
+    if [ "$U_STATE" = passed ] && auto_mergeable; then
+      # a clean pass merges now, in the background: nobody needs to act
+      ( [ -z "${COMMIT_LOCK:-}" ] || exec {COMMIT_LOCK}>&-
+        cd "$REPO" && exec setsid "$SELF" merge "$id" --auto ) >> "$RUN/log/$id.merge.log" 2>&1 < /dev/null &
+      echo "MERGING $id (clean pass, autonomy=auto-merge)"
+    fi
   fi
+}
+
+# auto_mergeable: from U_*, a pass that merges without the user: autonomy is
+# auto-merge, the critic left no notes, and the unit isn't marked risky
+auto_mergeable() {
+  [ "$(cfg_val "$CONFIG" autonomy)" = auto-merge ] && [ -z "$U_NOTES" ] && [ -z "$U_RISK" ]
 }
 
 # ---------------------------------------------------------------- decisions
@@ -553,6 +572,7 @@ verify_failed() { # <id> <command> <exit> <log> <why>
 #   merge <id>  -> MERGED <id> sha=<sha> (local merge only)
 cmd_merge() {
   [ -n "${1:-}" ] || { fail 2 'merge: <id> is required'; return; }
+  local MERGE_BY=""; [ "${2:-}" = --auto ] && MERGE_BY=auto
   # one merge at a time: watch and the coordinator may both try, and two
   # merges into the base at once would race
   local r=0
@@ -568,8 +588,13 @@ cmd_merge() {
 merge_locked() {
   local id=$1 base cur hash secs vlog code cmd sha changed
   unit_row "$id" || { refuse "$id" merged "unknown unit"; return; }
-  if ! { [ "$U_STATE" = approved ] || { [ "$U_STATE" = passed ] && [ "$(cfg_val "$CONFIG" autonomy)" = auto-merge ]; }; }; then
-    [ "$U_STATE" = passed ] && { refuse "$id" merged "needs the user's approval (coord approve $id)"; return; }
+  if ! { [ "$U_STATE" = approved ] || { [ "$U_STATE" = passed ] && auto_mergeable; }; }; then
+    if [ "$U_STATE" = passed ]; then
+      if [ -n "$U_NOTES" ]; then refuse "$id" merged "the critic passed it with notes, so it needs the user's approval (coord approve $id)"
+      elif [ -n "$U_RISK" ]; then refuse "$id" merged "a $U_RISK unit needs the user's approval (coord approve $id)"
+      else refuse "$id" merged "needs the user's approval (coord approve $id)"; fi
+      return
+    fi
     refuse "$id" merged "cannot merge from $U_STATE"; return
   fi
   base=$(cfg_val "$CONFIG" merge.base); base=${base:-main}
@@ -624,7 +649,8 @@ merge_locked() {
     refuse "$id" merged "git merge of $U_BRANCH into $base conflicted (unit returned to handback)"; return
   fi
   sha=$(git -C "$REPO" rev-parse HEAD)
-  one_event type=merged unit="$id" sha="$sha" || return
+  if [ -n "${MERGE_BY:-}" ]; then one_event type=merged unit="$id" sha="$sha" by="$MERGE_BY" || return
+  else one_event type=merged unit="$id" sha="$sha" || return; fi
   echo "MERGED $id sha=$sha"
   progress
   return 0
@@ -755,7 +781,7 @@ next_steps() {
     if [ "$unit" = - ]; then
       case "$type" in
         finished) echo "NEXT $seq: read the report; continue the shape it serves, or take the decision to the user" ;;
-        msg)      echo "NEXT $seq: act on the message" ;;
+        msg)      echo "NEXT $seq: act on the message; answer in your own window, never with coord msg (that wakes you again)" ;;
       esac
     fi
   done <<< "$1"
@@ -763,7 +789,8 @@ next_steps() {
     awk -F"$US" -v id="$unit" -v auto="$auto" '$1 == id {
       s = $2
       if (s == "built") a = "coord dispatch " id " --role critic"
-      else if (s == "passed" && auto) a = "coord merge " id
+      else if (s == "passed" && auto && $23 == "" && $21 == "") a = "nothing: a clean pass, the engine is merging it"
+      else if (s == "passed" && $23 != "") a = "ASK THE USER to approve " id " round " $4 ", showing the critic'"'"'s notes: " $23 "; on yes: coord approve " id " && coord merge " id
       else if (s == "passed") a = "ASK THE USER to approve " id " round " $4 " (an approval of an earlier round does not carry over); on yes: coord approve " id " && coord merge " id
       else if (s == "approved") a = "coord merge " id
       else if (s == "handback") a = "write a correction: coord brief " id ", fill in its CORRECTION from the reason above, then: coord dispatch " id " --role worker"
@@ -835,8 +862,8 @@ cmd_status() {
   inflight=$(model inflight)
   [ -n "$inflight" ] && n=$(tr ',' '\n' <<< "$inflight" | grep -c .)
   echo "STATUS relay=${rpid:--} alive=$ra undelivered=$und inflight=$n"
-  local id state kind round role owes pid wt br base wb logf disp tb deaths pass lvl sha ready deps risk goal p a last
-  while IFS=$US read -r id state kind round role owes pid wt br base wb logf disp tb deaths pass lvl sha ready deps risk goal; do
+  local id state kind round role owes pid wt br base wb logf disp tb deaths pass lvl sha ready deps risk goal notes p a last
+  while IFS=$US read -r id state kind round role owes pid wt br base wb logf disp tb deaths pass lvl sha ready deps risk goal notes; do
     p=- a=0
     if [ -n "$owes" ]; then p=$pid; alive "$pid" && a=1; fi
     echo "UNIT $id $state kind=$kind round=$round ready=$ready pid=$p alive=$a goal=$goal"

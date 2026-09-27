@@ -25,10 +25,10 @@ EOF
 
 out="$(coord_plan)"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
-  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge"
+  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=auto-merge"
 assert "$(printf '%s\n' "$out" | sed -n 2p)" "ASK"
 printf '%s\n' "$out" | grep -qx '  critic.model=' || { echo "  ASK missing critic.model"; exit 1; }
-printf '%s\n' "$out" | grep -qx '  autonomy=approve-merge' || { echo "  ASK missing autonomy"; exit 1; }
+printf '%s\n' "$out" | grep -qx '  autonomy=auto-merge' || { echo "  ASK missing autonomy"; exit 1; }
 if printf '%s\n' "$out" | grep -q '  critic.harness='; then echo "  roles should be forced"; exit 1; fi
 
 # apply with answers
@@ -74,7 +74,7 @@ EOF
 rm -f "$COORD_CONFIG"
 out="$(coord_plan)"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
-  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge"
+  "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=auto-merge"
 block="$(printf '%s\n' "$out" | tail -n +2)"
 case "$block" in *critic.harness=codex*) ;; *) echo "  ASK missing roles"; exit 1 ;; esac
 case "$block" in *lane.strong.harness=claude*) ;; *) echo "  ASK missing lane.strong"; exit 1 ;; esac

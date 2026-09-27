@@ -71,12 +71,30 @@ assert "$(state_of m6)" "handback"
 assert "$(cat "$(wt m6)/file.txt")" "$reviewed"
 hasnt "$(git -C "$(wt m6)" log -1 --format=%s)" "[coord]"
 
-# --- auto-merge needs no approval; repo must be on the base ---
-printf 'autonomy=auto-merge\n' >> "$REPO/.coordinator/config.conf"
+# --- the repo must be on the base ---
 to_passed m5
+"$COORD" approve m5 >/dev/null
 git -C "$REPO" checkout -q -b elsewhere
 refuses 'the repo is on "elsewhere", not the base "main"' "$COORD" merge m5
 git -C "$REPO" checkout -q main
 has "$("$COORD" merge m5)" "MERGED m5"
+
+# --- auto-merge: a clean pass merges on its own; notes or risk wait for the user ---
+printf 'autonomy=auto-merge\n' >> "$REPO/.coordinator/config.conf"
+"$COORD" unit add m7 --kind feature --goal "unit m7" >/dev/null
+"$COORD" dispatch m7 --role worker --brief "$TMP/brief" >/dev/null; wait_for is_state m7 built
+has "$("$COORD" dispatch m7 --role critic)" "DISPATCHED m7"
+wait_for is_state m7 merged
+has "$("$COORD" log m7)" "merged m7"
+grep -q $'\ttype=merged\tunit=m7\t.*by=auto' "$COORD_EVENTS" || { echo "  not marked auto"; exit 1; }
+"$COORD" unit add m8 --kind feature --goal "unit m8" >/dev/null
+"$COORD" dispatch m8 --role worker --brief "$TMP/brief" >/dev/null; wait_for is_state m8 built
+FAKE_CRITIC=notepass "$COORD" dispatch m8 --role critic >/dev/null; wait_for is_state m8 passed
+refuses "the critic passed it with notes, so it needs the user's approval" "$COORD" merge m8
+"$COORD" unit add m9 --kind feature --goal "unit m9" --risk risky >/dev/null
+printf 'routing.risky=default\n' >> "$REPO/.coordinator/config.conf"
+"$COORD" dispatch m9 --role worker --brief "$TMP/brief" >/dev/null; wait_for is_state m9 built
+"$COORD" dispatch m9 --role critic >/dev/null; wait_for is_state m9 passed
+refuses "a risky unit needs the user's approval" "$COORD" merge m9
 
 echo "  merge ok"

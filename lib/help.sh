@@ -130,7 +130,9 @@ coord finish --result <result> --summary "<one line>" [--slug <slug>]
   exact command, with the slug you owe (COORD_OWES); never invent one.
   worker:     --result done|partial
   critic:     --result pass|handback, --evidence none|typecheck|tests|live,
-              one --ran per command you ran, --flag only for what you proved
+              one --ran per command you ran, --flag only for what you proved,
+              --note for anything the user should see before it merges
+              (a pass with no notes merges on its own under auto-merge)
   researcher: --result done, after writing the report
 EOF
     ;;
@@ -146,8 +148,9 @@ EOF
     merge) cat <<'EOF'
 coord merge <id>
   -> MERGED <id> sha=<sha>, then READY <ids> and DONE when they apply
-  Needs a recorded approval of this round (or autonomy=auto-merge) and the
-  exact reviewed state. Commits it with the user's identity, re-runs the
+  Needs a recorded approval of this round, or, under autonomy=auto-merge (the
+  default), a clean pass: no critic notes and no --risk. finish starts that
+  merge itself (--auto). Needs the exact reviewed state. Commits it with the user's identity, re-runs the
   brief's VERIFY on it (new files VERIFY makes are dropped; edits to reviewed
   files refuse), and merges locally. Pushing is a separate decision.
 EOF

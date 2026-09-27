@@ -284,7 +284,7 @@ watch_frame() {
   if [ "${#UNITS[@]}" -gt 0 ] && [ "$OPEN" -eq 0 ]; then
     local shipped=() id round lvl goal merged=0 evl
     for row in "${UNITS[@]}"; do
-      IFS=$US read -r id st _ round _ _ _ _ _ _ _ _ _ _ _ _ lvl _ _ _ _ goal <<< "$row"
+      IFS=$US read -r id st _ round _ _ _ _ _ _ _ _ _ _ _ _ lvl _ _ _ _ goal _ <<< "$row"
       evl="EVL_${lvl:-none}"
       [ "$st" = merged ] && merged=$((merged + 1))
       shipped+=("$(glyph "$st") $(printf '%-13s ' "$id")$(m d "$(printf 'r%-3s' "$round")${!evl}")  $(clean "$goal")")
