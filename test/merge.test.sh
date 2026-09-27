@@ -52,13 +52,13 @@ has "$("$COORD" log m3)" "verify_failed m3"
 # the failed merge left no commit behind
 hasnt "$(git -C "$(wt m3)" log -1 --format=%s)" "[coord]"
 
-# --- VERIFY that leaves new files (bytecode, reports): dropped, merge goes on ---
-printf 'GOAL: g\nSCOPE: s\nACCEPTANCE: a\nVERIFY:\n  $ mkdir -p __pycache__ && echo x > __pycache__/m.pyc\n' > "$TMP/litter"
+# --- VERIFY that leaves new files (reports, output): dropped, merge goes on ---
+printf 'GOAL: g\nSCOPE: s\nACCEPTANCE: a\nVERIFY:\n  $ echo x > verify-report.txt\n' > "$TMP/litter"
 to_passed m4 "$TMP/litter"
 "$COORD" approve m4 >/dev/null
 has "$("$COORD" merge m4)" "MERGED m4"
-if git -C "$REPO" show --name-only --format= HEAD^2 | grep -q __pycache__; then echo "  verify output was merged"; exit 1; fi
-[ ! -e "$(wt m4)/__pycache__" ] || { echo "  verify output left in the worktree"; exit 1; }
+if git -C "$REPO" show --name-only --format= HEAD^2 | grep -q verify-report; then echo "  verify output was merged"; exit 1; fi
+[ ! -e "$(wt m4)/verify-report.txt" ] || { echo "  verify output left in the worktree"; exit 1; }
 
 # --- VERIFY that edits a reviewed file tested something else: refused ---
 printf 'GOAL: g\nSCOPE: s\nACCEPTANCE: a\nVERIFY:\n  $ echo reformatted >> file.txt\n' > "$TMP/edits"

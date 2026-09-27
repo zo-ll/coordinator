@@ -194,6 +194,58 @@ make_worktree() {
   fi
 }
 
+# refresh_worktree <id> <wt>: before a worker round, move the unit's worktree
+# onto the current base when the base has moved on, carrying the worker's
+# uncommitted change across: saved as a patch (kept in the log dir), the
+# branch fast-forwarded, the patch re-applied with a 3-way merge. Conflicting
+# hunks are left as markers; REFRESH_CONFLICTS lists their files.
+refresh_worktree() {
+  local id=$1 wt=$2 baseref base patch tmp
+  REFRESH_CONFLICTS=""
+  baseref=$(cfg_val "$CONFIG" merge.base); baseref=${baseref:-main}
+  base=$(git -C "$REPO" rev-parse --verify --quiet "$baseref^{commit}") || return 0
+  git -C "$wt" merge-base --is-ancestor "$base" HEAD 2>/dev/null && return 0   # already on it
+  git -C "$wt" merge-base --is-ancestor HEAD "$base" 2>/dev/null || return 0    # diverged: leave it
+  patch="$RUN/log/$id.refresh.$(date +%s).patch"
+  tmp=$(mktemp -d) || return 1
+  { GIT_INDEX_FILE="$tmp/index" git -C "$wt" read-tree HEAD &&
+    GIT_INDEX_FILE="$tmp/index" git -C "$wt" add -A -- . ':(exclude).scratch' &&
+    GIT_INDEX_FILE="$tmp/index" git -C "$wt" diff --cached --binary HEAD > "$patch"; } >/dev/null 2>&1 || { rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+  git -C "$wt" reset -q --hard "$base" && git -C "$wt" clean -fdq -e .scratch || return 1
+  [ -s "$patch" ] || return 0
+  if ! git -C "$wt" apply --3way --whitespace=nowarn "$patch" >/dev/null 2>&1; then
+    REFRESH_CONFLICTS=$(git -C "$wt" diff --name-only --diff-filter=U | paste -sd' ' -)
+    [ -n "$REFRESH_CONFLICTS" ] || REFRESH_CONFLICTS="(the patch did not apply; it is saved at $patch)"
+  fi
+  git -C "$wt" reset -q >/dev/null 2>&1 || true   # leave the change unstaged, markers and all
+}
+
+# artifacts_ignored: build artifacts never belong to a unit's change. The
+# repo's local exclude file (never committed) lists them once, so workers and
+# critics don't see them and reviewed states and merges leave them out.
+ARTIFACTS='__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+node_modules/
+.venv/
+*.egg-info/
+.tox/
+.DS_Store'
+artifacts_ignored() {
+  local f
+  f=$(git -C "$REPO" rev-parse --git-common-dir 2>/dev/null) || return 0
+  case $f in /*) ;; *) f="$REPO/$f" ;; esac
+  f="$f/info/exclude"
+  grep -qxF '# coordinator: build artifacts, never part of a change' "$f" 2>/dev/null && return 0
+  mkdir -p "$(dirname "$f")"
+  printf '\n# coordinator: build artifacts, never part of a change\n%s\n' "$ARTIFACTS" >> "$f"
+}
+
 # critic_brief <round> <worker brief>: the critic's assignment, composed from
 # the worker brief's criteria only; CONTEXT and other coordinator prose never
 # reach the critic.
@@ -312,9 +364,15 @@ cmd_dispatch() {
 
   # the worktree: created on the unit's first worker round, reused after
   local wt=$U_WT fresh=0
+  artifacts_ignored
   if [ -z "$wt" ]; then
     make_worktree "$id" || { rm -f "$body"; refuse "$id" dispatched "$WT_ERR"; return; }
     wt=$WT_PATH fresh=1
+  elif [ "$role" = worker ]; then
+    refresh_worktree "$id" "$wt" || { rm -f "$body"; refuse "$id" dispatched "cannot move $wt onto the current base"; return; }
+    if [ -n "$REFRESH_CONFLICTS" ]; then
+      printf '\nENGINE NOTE: the base moved on since your last round, so the engine moved this worktree onto it and re-applied your change. These files have conflict markers (<<<<<<<) to resolve first: %s\n' "$REFRESH_CONFLICTS" >> "$body"
+    fi
   fi
   U_WT=$wt
 
@@ -526,7 +584,7 @@ merge_locked() {
   git -C "$U_WT" add -A -- . ':(exclude).scratch' >&2 || { refuse "$id" merged "cannot stage the reviewed state in $U_WT"; return; }
   git -C "$U_WT" -c user.email="$ID_EMAIL" -c user.name="$ID_NAME" commit -q -m "[coord] $U_GOAL" >&2 || {
     refuse "$id" merged "commit failed in $U_WT (nothing to commit?)"; return; }
-  uncommit() { git -C "$U_WT" reset -q --soft HEAD~1 || true; }
+  uncommit() { git -C "$U_WT" reset -q HEAD~1 || true; }
 
   # VERIFY, re-run by the engine on the reviewed state
   secs=$(dur "$(cfg_val "$CONFIG" verify.timeout)" 2>/dev/null) || secs=600
@@ -547,9 +605,14 @@ merge_locked() {
   fi
   git -C "$U_WT" clean -fdq -e .scratch >/dev/null 2>&1 || true
 
-  if ! git -c user.email="$ID_EMAIL" -c user.name="$ID_NAME" -C "$REPO" merge --no-ff --no-edit "$U_BRANCH" >/dev/null 2>&1; then
+  local merr
+  if ! merr=$(git -c user.email="$ID_EMAIL" -c user.name="$ID_NAME" -C "$REPO" merge --no-ff --no-edit "$U_BRANCH" 2>&1); then
     git -C "$REPO" merge --abort >/dev/null 2>&1 || true
-    git -C "$U_WT" reset -q --soft HEAD~1 || true
+    git -C "$U_WT" reset -q HEAD~1 || true
+    if grep -q 'untracked working tree files would be overwritten' <<< "$merr"; then
+      # not the unit's fault: the base's checkout has untracked files in the way
+      refuse "$id" merged "untracked files in $REPO would be overwritten: $(grep -E '^\s' <<< "$merr" | tr -d '\t ' | paste -sd' ' -) (move them, then merge again)"; return
+    fi
     one_event type=rejected unit="$id" by=engine \
       text="merge into $base conflicted; bring the change up to date with $base in a correction round" || return
     refuse "$id" merged "git merge of $U_BRANCH into $base conflicted (unit returned to handback)"; return
@@ -871,6 +934,7 @@ cmd_start() {
     return 1
   fi
   mkdir -p "$RUN"
+  artifacts_ignored
   echo "$sid" > "$RUN/session"
   [ -f "$LOG" ] || : > "$LOG"
   echo "SESSION $sid source=$src harness=$harness repo=$REPO"
