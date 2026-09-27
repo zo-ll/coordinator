@@ -1,98 +1,144 @@
 #!/usr/bin/env bash
-# coord relay: one batch per wave, bounded retries, one relay per run,
-# redelivery after a crash, dead launches, the retry cap, and timeboxes.
+# relay.sh: one batch per wave, config-driven resume, ack on success.
 set -euo pipefail
-. "$(dirname "$0")/lib.sh"
-setup_run
-fake_resume
-brief "$TMP/brief"
-status_line() { "$COORD" status | head -n1; }
-last_batch() { sed 's/.*WAKE batch=//' "$RELAY_LOG" | tail -n1; }
 
-# --- N workers finish at once: every finish once, one resume for all ---
-for i in $(seq 1 10); do "$COORD" unit add "c$i" --kind feature --goal "unit $i" >/dev/null; done
-for i in $(seq 1 10); do "$COORD" dispatch "c$i" --role worker --brief "$TMP/brief" >/dev/null & done
-wait
-wait_for bash -c '[ "$("$COORD" status | grep -c " built ")" = 10 ]'
-printf '1. keep it small\n' > "$REPO/.coordinator/standing.md"
-"$COORD" relay --once --interval 0.1
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RELAY="$HERE/../scripts/relay.sh"
+QUEUE="$HERE/../scripts/queue.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+export COORD_ROOT="$TMP/coord"
+export COORD_SESSION="sess-1"
+export RELAY_LOG="$TMP/resume.log"
+: > "$RELAY_LOG"
+
+cat > "$TMP/fake-resume" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$RELAY_LOG"
+EOF
+chmod +x "$TMP/fake-resume"
+export COORD_RESUME="$TMP/fake-resume|__SESSION__|__BATCH__"
+
+assert() { [ "$1" = "$2" ] || { echo "  assert failed: '$1' != '$2'"; exit 1; }; }
+
+# a wave already queued before the relay starts -> exactly one batch
+for i in $(seq 1 20); do
+  "$QUEUE" enqueue "t$i" "DONE t$i: done — x" >/dev/null
+done
+
+"$RELAY" --once --interval 0.2
+
 assert "$(wc -l < "$RELAY_LOG" | tr -d ' ')" "1"
-has "$(cat "$RELAY_LOG")" "sess-1 WAKE batch="
-batch="$(last_batch)"
-assert "$(grep -c '^EVENT [0-9]* c[0-9]* finished c[0-9]*.r1.worker done — did it$' "$batch")" "10"
-grep -qx '1. keep it small' "$batch" || { echo "  standing orders missing"; exit 1; }
-has "$(status_line)" "undelivered=0 inflight=0"
+line="$(cat "$RELAY_LOG")"
+case "$line" in
+  *"sess-1"*) ;;
+  *) echo "  session not passed: $line"; exit 1 ;;
+esac
+batch="${line##*WAKE batch=}"
+[ -f "$batch" ] || { echo "  batch file missing: $batch"; exit 1; }
+assert "$(grep -c '^EVENT ' "$batch")" "20"
 
-# --- permanent failure: bounded retries, loud give-up, events returned ---
-cat > "$TMP/bin/fail-resume" <<'F'
+# acknowledged: nothing pending, everything in done
+assert "$("$QUEUE" list | wc -l)" "0"
+assert "$(ls "$COORD_ROOT/queue/.done" | wc -l)" "20"
+
+# --- permanent failure: bounded retries, loud give-up, events kept in .inflight
+cat > "$TMP/fail-resume" <<'EOF'
 #!/usr/bin/env bash
 exit 1
-F
-chmod +x "$TMP/bin/fail-resume"
-"$COORD" msg - "hello" >/dev/null
-if COORD_RESUME=fail-resume "$COORD" relay --once --max-attempts 3 --backoff 0 >/dev/null 2>"$TMP/err"; then
+EOF
+chmod +x "$TMP/fail-resume"
+export COORD_RESUME="$TMP/fail-resume"
+
+"$QUEUE" enqueue f1 'DONE f1: done' >/dev/null
+"$QUEUE" enqueue f2 'DONE f2: done' >/dev/null
+if "$RELAY" --once --max-attempts 3 --backoff 0 >/dev/null 2>"$TMP/err"; then
   echo "  relay should have given up"; exit 1
 fi
-grep -q 'attempt 1/3' "$TMP/err" || { echo "  no retry line:"; cat "$TMP/err"; exit 1; }
-grep -q 'returned the events and stopped' "$TMP/err" || { echo "  no give-up line:"; cat "$TMP/err"; exit 1; }
-has "$(status_line)" "undelivered=1 inflight=0"
+grep -q 'attempt 1/3' "$TMP/err" || { echo "  no backoff retry:"; cat "$TMP/err"; exit 1; }
+grep -q 'returned the events to the queue and stopped' "$TMP/err" || { echo "  no give-up line:"; cat "$TMP/err"; exit 1; }
+assert "$("$QUEUE" depth)" "QUEUE pending=2 inflight=0 done=20"
+[ ! -e "$COORD_ROOT/relay.pid" ] || { echo "  pid not cleaned on exit"; exit 1; }
 
-# --- transient failure: retried, then acked ---
-cat > "$TMP/bin/flaky-resume" <<F
+# --- transient failure: retried until it succeeds, then acked
+: > "$RELAY_LOG"
+cat > "$TMP/flaky-resume" <<EOF
 #!/usr/bin/env bash
-n=\$(cat "$TMP/count" 2>/dev/null || echo 0); n=\$((n + 1)); echo \$n > "$TMP/count"
+n=\$(cat "$TMP/count" 2>/dev/null || echo 0)
+n=\$((n + 1)); echo \$n > "$TMP/count"
 [ \$n -ge 2 ] || exit 1
 printf '%s\n' "\$*" >> "$RELAY_LOG"
-F
-chmod +x "$TMP/bin/flaky-resume"
-COORD_RESUME="flaky-resume|__BATCH__" "$COORD" relay --once --max-attempts 5 --backoff 0 2>/dev/null
-has "$(status_line)" "undelivered=0 inflight=0"
-has "$(cat "$(last_batch)")" "- msg hello"
+EOF
+chmod +x "$TMP/flaky-resume"
+export COORD_RESUME="$TMP/flaky-resume"
+rm -f "$TMP/count"
 
-# --- a second relay refuses while one holds the lock ---
-"$COORD" msg - "two" >/dev/null
-exec 9>"$REPO/.coordinator/relay.lock"
-flock -n 9
-refuses "another relay already holds" "$COORD" relay --once
+"$QUEUE" enqueue tx1 'DONE t1: done' >/dev/null
+"$QUEUE" enqueue tx2 'DONE t2: done' >/dev/null
+"$RELAY" --once --max-attempts 5 --backoff 0
+assert "$(wc -l < "$RELAY_LOG" | tr -d ' ')" "1"
+assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=24"
+
+# --- a second relay refuses to run while one holds the lock
+"$QUEUE" enqueue u1 'DONE u1: done' >/dev/null
+"$QUEUE" enqueue u2 'DONE u2: done' >/dev/null
+exec 9>"$COORD_ROOT/relay.lock"
+flock -n 9 || { echo "  test lock failed"; exit 1; }
+if "$RELAY" --once >/dev/null 2>"$TMP/err"; then
+  echo "  second relay should have refused"; exit 1
+fi
+grep -q 'another relay already holds' "$TMP/err" || { echo "  no refusal line:"; cat "$TMP/err"; exit 1; }
+assert "$("$QUEUE" depth)" "QUEUE pending=2 inflight=0 done=24"
 exec 9>&-
 
-# --- a relay killed mid-turn leaves the batch claimed; the next redelivers it ---
-cat > "$TMP/bin/crash-resume" <<'F'
-#!/usr/bin/env bash
-kill -9 "$(cat "$REPO/.coordinator/relay.pid")"
-F
-chmod +x "$TMP/bin/crash-resume"
-( COORD_RESUME=crash-resume "$COORD" relay --once; true ) 2>/dev/null || true
-has "$(status_line)" "undelivered=0 inflight=1"
+# --- requeue the give-up leftovers (f1/f2 in .inflight) with queue.sh nack
+"$QUEUE" nack
+assert "$("$QUEUE" depth)" "QUEUE pending=2 inflight=0 done=24"
+
+# released lock lets a fresh relay run again; it drains everything
+"$RELAY" --once --interval 0.2
+assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=26"
+
+# --- a crash-stranded batch in .inflight is reclaimed at relay startup ---
+export COORD_RESUME="$TMP/fake-resume|__SESSION__|__BATCH__"
+out="$("$QUEUE" enqueue str1 'DONE str1: done')"
+ping="${out##* }"
+mv "$COORD_ROOT/queue/$ping" "$COORD_ROOT/queue/.inflight/"
+assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=1 done=26"
+"$RELAY" --once --interval 0.2
+assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=27"
+
+# --- liveness: a dispatched pid that exited without finishing -> DIED event
+export COORD_LEDGER="$TMP/ledger.tsv"
+export COORD_STANDING="$TMP/standing.md"
+STATE="$HERE/../scripts/state.sh"
+bash -c 'exit 0' & dead=$!; wait "$dead"
+sleep 30 & live=$!
+bash -c 'exit 0' & fin=$!; wait "$fin"
+"$STATE" add d1 "dies" >/dev/null;  "$STATE" dispatch d1 "$dead" /wt d1 d1 >/dev/null
+"$STATE" add d2 "runs" >/dev/null;  "$STATE" dispatch d2 "$live" /wt d2 d2 >/dev/null
+"$STATE" add d3 "finished" >/dev/null; "$STATE" dispatch d3 "$fin" /wt d3 d3 >/dev/null
+"$QUEUE" enqueue d3 'DONE d3: done' >/dev/null
+printf '1. keep it small\n' > "$COORD_STANDING"
 : > "$RELAY_LOG"
-"$COORD" relay --once --interval 0.1
-has "$(status_line)" "undelivered=0 inflight=0"
-has "$(cat "$(last_batch)")" "- msg two"
 
-# --- a launch that exits without finishing -> died; twice in a round -> blocked ---
-export FAKE_WORKER=exit
-"$COORD" unit add d1 --kind feature --goal dies >/dev/null
-"$COORD" dispatch d1 --role worker --brief "$TMP/brief" >/dev/null
-"$COORD" relay --once --interval 0.1
-has "$(cat "$(last_batch)")" "d1 died d1.r1.worker pid="
-assert "$(state_of d1)" "stalled"
-has "$("$COORD" dispatch d1 --role worker)" "round=1"   # same round, brief reused
-"$COORD" relay --once --interval 0.1
-b="$(cat "$(last_batch)")"
-has "$b" "d1 died d1.r1.worker"
-has "$b" "d1 blocked died 2 times in round 1"
-assert "$(state_of d1)" "blocked"
+"$RELAY" --once --interval 0.2
+"$STATE" drop d2 >/dev/null; kill "$live" 2>/dev/null || true
+batch="$(sed 's/.*WAKE batch=//' "$RELAY_LOG")"
+grep -q "^EVENT d1.died.$dead DIED d1: pid $dead exited without finish.sh" "$batch" || {
+  echo "  no DIED for d1:"; cat "$batch"; exit 1; }
+grep -q 'd2' "$batch" && { echo "  live d2 reported:"; cat "$batch"; exit 1; }
+grep -q 'DIED d3' "$batch" && { echo "  finished d3 reported dead"; exit 1; }
+# standing orders ride on every batch
+grep -q '^1. keep it small$' "$batch" || { echo "  standing orders missing:"; cat "$batch"; exit 1; }
 
-# --- a launch past its timebox is killed with its group and reported ---
-export FAKE_WORKER=sleep
-{ cat "$TMP/brief"; echo "TIMEBOX: 1s"; } > "$TMP/quick"
-"$COORD" unit add t1 --kind feature --goal slow >/dev/null
-"$COORD" dispatch t1 --role worker --brief "$TMP/quick" >/dev/null
-pid="$("$COORD" status | awk '$2=="t1" {print $7}' | cut -d= -f2)"
-kill -0 "$pid"
-"$COORD" relay --once --interval 0.2
-has "$(cat "$(last_batch)")" "t1 died t1.r1.worker pid=$pid timeout"
-kill -0 "$pid" 2>/dev/null && { echo "  timed-out launch still alive"; exit 1; }
-assert "$(state_of t1)" "stalled"
+# a DIED is reported once per launch, not once per relay loop
+"$QUEUE" enqueue n1 'DONE n1: done' >/dev/null
+: > "$RELAY_LOG"
+"$RELAY" --once --interval 0.2
+batch="$(sed 's/.*WAKE batch=//' "$RELAY_LOG")"
+grep -q 'DIED d1' "$batch" && { echo "  DIED re-reported"; exit 1; }
+[ "$(grep -c '^EVENT ' "$batch")" = 1 ] || { echo "  unexpected events:"; cat "$batch"; exit 1; }
 
 echo "  relay ok"

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# coord detect: current-harness sentinel, PATH scan, spawnable filtering.
+# detect.sh: current-harness sentinel, PATH scan, spawnable filtering.
 set -euo pipefail
-. "$(dirname "$0")/lib.sh"
-coord_detect() { "$COORD" detect "$@"; }
-coord_cfg() { "$COORD" cfg "$@"; }
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DETECT="$HERE/../scripts/detect.sh"
+CFG="$HERE/../scripts/cfg.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
 export COORD_HOME="$TMP/coord"
 export COORD_ENV_CONF="$TMP/coord/env.conf"
@@ -15,15 +17,16 @@ printf '#!/bin/sh\nexit 0\n' > "$TMP/bin/codex"
 chmod +x "$TMP/bin/codex"
 export PATH="$TMP/bin:$PATH"
 
+assert() { [ "$1" = "$2" ] || { echo "  assert failed: '$1' != '$2'"; exit 1; }; }
 
-out="$(coord_detect)"
+out="$("$DETECT")"
 case "$out" in DETECT\ *) ;; *) echo "  unexpected output: $out"; exit 1 ;; esac
 
-assert "$(coord_cfg get "$COORD_ENV_CONF" current)" "opencode"
-assert "$(coord_cfg get "$COORD_ENV_CONF" current_source)" "env"
-assert "$(coord_cfg get "$COORD_ENV_CONF" installed)" "codex"
-assert "$(coord_cfg get "$COORD_ENV_CONF" spawnable)" "codex"
-assert "$(coord_cfg get "$COORD_ENV_CONF" harness.codex.bin)" "$TMP/bin/codex"
-[ -n "$(coord_cfg get "$COORD_ENV_CONF" harness.codex.resume)" ] || { echo "  missing resume recipe"; exit 1; }
+assert "$("$CFG" get "$COORD_ENV_CONF" current)" "opencode"
+assert "$("$CFG" get "$COORD_ENV_CONF" current_source)" "env"
+assert "$("$CFG" get "$COORD_ENV_CONF" installed)" "codex"
+assert "$("$CFG" get "$COORD_ENV_CONF" spawnable)" "codex"
+assert "$("$CFG" get "$COORD_ENV_CONF" harness.codex.bin)" "$TMP/bin/codex"
+[ -n "$("$CFG" get "$COORD_ENV_CONF" harness.codex.resume)" ] || { echo "  missing resume recipe"; exit 1; }
 
 echo "  detect ok"

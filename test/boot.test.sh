@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# coord plan + apply: proposal/ask split, single-harness forcing, validation.
+# plan.sh + apply.sh: proposal/ask split, single-harness forcing, validation.
 set -euo pipefail
-. "$(dirname "$0")/lib.sh"
-coord_plan() { "$COORD" plan "$@"; }
-coord_apply() { "$COORD" apply "$@"; }
-coord_cfg() { "$COORD" cfg "$@"; }
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLAN="$HERE/../scripts/plan.sh"
+APPLY="$HERE/../scripts/apply.sh"
+CFG="$HERE/../scripts/cfg.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
 export COORD_HOME="$TMP/coord"
 export COORD_ENV_CONF="$TMP/coord/env.conf"
 export COORD_CONFIG="$TMP/repo/.coordinator/config.conf"
 mkdir -p "$COORD_HOME"
 
+assert() { [ "$1" = "$2" ] || { echo "  assert failed: '$1' != '$2'"; exit 1; }; }
 
 # synthetic env: one spawnable harness, no tmux, no gh
 cat > "$COORD_ENV_CONF" <<EOF
@@ -25,7 +28,7 @@ harness.codex.exec=codex|exec|__PROMPT__
 harness.codex.resume=codex|exec|resume|__SESSION__|__BATCH__
 EOF
 
-out="$(coord_plan)"
+out="$("$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
   "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=none autonomy=approve-merge tracker=local adapters=none"
 assert "$(printf '%s\n' "$out" | sed -n 2p)" "ASK"
@@ -34,17 +37,17 @@ printf '%s\n' "$out" | grep -qx '  autonomy=approve-merge' || { echo "  ASK miss
 if printf '%s\n' "$out" | grep -q '  critic.harness='; then echo "  roles should be forced"; exit 1; fi
 
 # apply with answers
-assert "$(coord_apply --answers 'autonomy=auto-merge critic.model=gpt-5')" "OK config=$COORD_CONFIG"
-assert "$(coord_cfg get "$COORD_CONFIG" critic.harness)" "codex"
-assert "$(coord_cfg get "$COORD_CONFIG" autonomy)" "auto-merge"
-assert "$(coord_cfg get "$COORD_CONFIG" critic.model)" "gpt-5"
-assert "$(coord_cfg get "$COORD_CONFIG" tracker)" "local"
+assert "$("$APPLY" --answers 'autonomy=auto-merge critic.model=gpt-5')" "OK config=$COORD_CONFIG"
+assert "$("$CFG" get "$COORD_CONFIG" critic.harness)" "codex"
+assert "$("$CFG" get "$COORD_CONFIG" autonomy)" "auto-merge"
+assert "$("$CFG" get "$COORD_CONFIG" critic.model)" "gpt-5"
+assert "$("$CFG" get "$COORD_CONFIG" tracker)" "local"
 
 # once configured, plan asks nothing
-assert "$(printf '%s\n' "$(coord_plan)" | sed -n 2p)" "ASK"
+assert "$(printf '%s\n' "$("$PLAN")" | sed -n 2p)" "ASK"
 
 # invalid harness answer fails loudly
-if coord_apply --answers 'critic.harness=ghost' >/dev/null 2>&1; then
+if "$APPLY" --answers 'critic.harness=ghost' >/dev/null 2>&1; then
   echo "  expected unknown harness to fail"; exit 1
 fi
 
@@ -59,7 +62,7 @@ harness.codex.bin=$(command -v sh)
 harness.claude.bin=$(command -v sh)
 EOF
 rm -f "$COORD_CONFIG"
-out="$(coord_plan)"
+out="$("$PLAN")"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \
   "PROPOSE critic=codex researcher=codex lane.default=codex lane.strong=claude autonomy=approve-merge tracker=local adapters=none"
 block="$(printf '%s\n' "$out" | tail -n +2)"

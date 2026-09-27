@@ -1,11 +1,5 @@
 # Harness behavior — how each agent runs the coordinator
 
-> Recorded against v1 (the bash scripts). The harness findings — session
-> discovery, resume recipes, permission flags — carry over to v2 unchanged;
-> command names map as `coord.sh` → `coord start`, `spawn.sh` → `coord
-> dispatch`, `finish.sh` → `coord finish`, `status.sh` → `coord status`,
-> `merge.sh` → `coord merge`.
-
 Field notes from the sandbox runs (no-tmux, single-harness, same todo-CLI
 mission) at `/tmp/coord-sandbox`. Each section: how the skill surfaced, how the
 coordinator's session identity was discovered, how the relay woke it, its git

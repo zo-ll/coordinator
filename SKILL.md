@@ -1,144 +1,137 @@
 ---
 name: coordinator
 description: >-
-  Turn the current agent into a coordinator that decomposes a goal into typed
-  units of work, dispatches one worker per unit on an isolated git worktree,
-  has an independent critic review each result against evidence rules, and
-  merges only approved work whose checks the engine re-runs itself.
-  Harness-agnostic, one static binary: a single installed harness is enough,
-  and no tmux, python, or node is required. Use for multi-part work spanning
-  multiple files/areas, or on "coordinate"/"delegate"/"dispatch".
+  Turn the current agent into a coordinator that decomposes a goal into small
+  vertical slices, publishes them, spawns one worker per slice on an isolated
+  git worktree, has an independent critic review each survivor, and merges only
+  approved work. Harness-agnostic and bash-only: a single installed harness is
+  enough, and no tmux, python, or node is required. Use for multi-part work
+  spanning multiple files/areas, or on "coordinate"/"delegate"/"dispatch".
 ---
 
 # Coordinator
 
 ## Invariant
 
-The engine enforces shape; you supply judgment. You frame the goal, cut it
-into units, and write worker briefs. The engine owns rounds, slugs, worktrees,
-evidence rules, transitions, timeouts, and retries, and refuses anything
-illegal with one `REFUSED <unit> <event>: <reason>` line. The critic is the
-only content reviewer: you never read a worker's diff. Every command below is
-`bin/coord <verb>` from this skill's directory; read only its one-line output.
+You route protocol; the critic is the only content reviewer. You never read a
+worker's diff. All state lives in the scripts' files; you read only their
+one-line outputs.
 
 ## Boot
 
-1. `bin/coord detect` → `DETECT …`; writes `env.conf`.
-2. `bin/coord plan` → a `PROPOSE` line and an `ASK` block of `key=value` lines.
+1. `scripts/detect.sh` → `DETECT …`; writes `env.conf`.
+2. `scripts/plan.sh` → a `PROPOSE` line and an `ASK` block of `key=value` lines.
 3. If the `ASK` block has entries, you MUST pose a real question and WAIT for the
    user's reply — never just list the fields:
    - Present each `key` with its proposed `value`. An empty model value means
      "use that harness's default model"; the user must confirm it.
    - Let the user accept all defaults or change any key.
    Then:
-   - accepted everything → `bin/coord apply --accept`
-   - changed fields → `bin/coord apply --answers "key=value key=value"`
-   If the `ASK` block is empty, run `bin/coord apply --accept`.
+   - accepted everything → `scripts/apply.sh --accept`
+   - changed fields → `scripts/apply.sh --answers "key=value key=value"`
+   If the `ASK` block is empty, run `scripts/apply.sh --accept`.
    It prints `OK config=…` or `FAIL <field>: <reason>`; on `FAIL`, stop.
-4. `bin/coord start` → `SESSION … source=…` + `RELAY …`; sets up
-   `.coordinator/` and starts the relay detached. If it fails, no fake ids are
-   invented — pass `--session <the-harness-real-session-id>`.
-5. Add the units (below), dispatch every id `bin/coord unit next` prints, and
-   end your turn. The relay drives every turn after this.
+4. `scripts/coord.sh` → `SESSION … source=…` + `RELAY …`; starts the relay
+   detached. If it fails, no fake ids are invented — pass `--session
+   <the-harness-real-session-id>` (pi uses `$PI_SESSION_ID`, codex the live
+   rollout).
 
-## Units
+## Slice lifecycle
 
-`bin/coord unit add <id> --kind <kind> --goal "<goal>" [--deps a,b] [--risk risky]`
+- Add: `scripts/state.sh add <id> "<goal>" [--blockers 1,2]`
+  The event slug IS the slice id: `<id>` for a worker round, `<id>.critic`
+  for a critic, `<id>.r<N>` for a re-review. Never decorate it further — one
+  brief, one slug per round; worktree.sh names branches from it.
+- Worktree: `scripts/worktree.sh --slice <id> --slug <slug>`
+- Dispatch a worker:
+  `scripts/spawn.sh --role worker --prompt <brief> --worktree <dir> --slice <id> [--risk mechanical|risky]`
+  (`--risk` picks the lane via `routing.<risk>`; omit it for `lane.default`).
+- Review: `scripts/spawn.sh --role critic --prompt <assignment>
+  --worktree <dir> --slice <id>` (a critic is a review round of a slice).
+- Close: after a `pass` bound to the exact reviewed state (the critic's
+  `git diff HEAD | sha256sum` of the worktree) and the user's approval,
+  `scripts/merge.sh --slice <id>`.
 
-- `kind` picks the playbook: `feature`, `bugfix`, `refactor`, `chore` (or a
-  repo playbook in `.coordinator/playbooks/`). It sets the required brief
-  fields, what the worker and critic are told, the evidence a pass needs, and
-  the timebox. Pick the kind that matches the work; do not restate its rules.
-- `--deps` orders units: a unit is ready when its deps are merged or dropped.
-- `--risk` routes the worker to the lane `routing.<risk>` names in config.
-- Ids are `[A-Za-z0-9_-]+`. One unit, one worktree, one branch.
+## Briefs and standing orders
 
-## Briefs
-
-A worker brief is a file of `FIELD:` sections, each at the start of a line.
-`dispatch` refuses one missing a field its playbook requires. A field you
-cannot fill is a unit you have not scoped.
+`spawn.sh` refuses a brief that lacks its role's header lines (`FIELD:` at the
+start of a line). A field you cannot fill is a slice you have not scoped.
 
 ```
 GOAL:        one sentence, executable by a stranger with no chat access
 SCOPE:       paths it may write, paths it may not
 CONTEXT:     files to read; upstream results pasted in full (workers see no siblings)
-REPRO:       (bugfix) the steps that show the defect
 ACCEPTANCE:  checkable criteria, one per line
-VERIFY:      commands, one per line prefixed "$ " — the worker runs them,
-             the critic runs them, and merge re-runs them on the reviewed state
-TIMEBOX:     optional, e.g. 30m (else the playbook's)
+VERIFY:      exact build/test commands
+TIMEBOX:     rough cap; on expiry, report partial work and finish
 ```
 
-You never write the critic's brief: the engine composes it from GOAL, SCOPE,
-REPRO, ACCEPTANCE, and VERIFY. CONTEXT is yours and stays with the worker.
+Required: worker `GOAL SCOPE ACCEPTANCE VERIFY`; critic `ACCEPTANCE`;
+researcher `GOAL`. Size the brief to the slice.
 
-`.coordinator/standing.md` holds the run's standing orders: numbered lines, one
-constraint each. Every launch and every batch carries them. When you catch
-yourself restating an instruction, append it there instead.
-
-## Dispatch
-
-- Worker: `bin/coord dispatch <id> --role worker --brief <file>`
-- Critic: `bin/coord dispatch <id> --role critic`
-- Research (optional, no unit): `bin/coord research --brief <file>` with a
-  `GOAL:`; the researcher writes a decision brief to the report path it prints.
-
-The engine computes the round and the finish slug, creates the worktree, and
-appends the finish contract. A correction round is just another worker
-dispatch after a handback: write a correction brief (what failed, what to do)
-and dispatch; the round advances by itself.
+`.coordinator/standing.md` holds the run's standing orders: numbered lines,
+one constraint each. `spawn.sh` appends it verbatim to every brief and the
+relay to every batch. When you catch yourself restating an instruction, append
+it there instead.
 
 ## The loop (the relay drives it; you own no loop)
 
 The relay resumes this session with `WAKE batch=<path>`. At the start of every
-resumed turn, read the batch file and route each line
-`EVENT <seq> <unit> <type> <details>`:
+resumed turn, read the batch file and route each `EVENT`:
 
-- `finished` … worker `done` → `bin/coord dispatch <unit> --role critic`.
-- `finished` … critic `pass` → the unit is passed. Ask the user; on their
-  approval `bin/coord approve <unit>` then `bin/coord merge <unit>`. Under
-  `autonomy=auto-merge`, merge directly.
-- `finished` … critic `handback`, `converted` (a pass without enough evidence),
-  `verify_failed` (merge re-ran VERIFY and it failed), `rejected`, or worker
-  `partial` → write a correction brief from the reason and dispatch the worker.
-- `died` → `bin/coord status`, then dispatch the same role again (a worker's
-  brief is reused if you omit `--brief`). After two deaths in one round the
-  engine blocks the unit itself.
-- `blocked` (by the engine) → tell the user; `bin/coord reopen <unit> --reason …`
-  once the cause is fixed.
-- `finished` … researcher → read the report, route the decision to the user.
-- `approved` → `bin/coord merge <unit>`. `msg` → act on the text.
+- `DONE <task>: done` → write a review assignment; `spawn.sh --role critic`.
+- `VERDICT <task>: pass @ <state-hash>` → `state.sh verdict`; ask the user; on
+  approval `merge.sh --slice <id>` (authors the commit with the user's
+  identity, merges, pushes).
+- `VERDICT <task>: handback` → write a correction brief; respawn the SAME
+  worker with a new round slug.
+- `DIED <task>: pid … exited without finish.sh` → the launch died. Run
+  `status.sh`, then respawn the same role for the same round. After two deaths
+  of one slice, `state.sh blocked <id>` and tell the user.
 
-Then dispatch every id `bin/coord unit next` prints. When `bin/coord done`
-prints `DONE`, report what shipped and stop.
+Correlate `DONE <slug>` / `VERDICT <slug>` to the slice whose id is the slug's
+task prefix (before the first `.`). Resolve the task to a slice id in this
+order: (1) exact ledger id; (2) if the task ends in `-<suffix>`, retry with the
+trailing `-…` segment stripped (a worker may carry the worktree suffix);
+(3) otherwise it is a protocol error — surface it, do not guess.
 
-Delivery is at-least-once: after a relay crash an event may come twice. Every
-command is safe to repeat — a repeated dispatch or finish is refused or `DUP`,
-never doubled.
+Delivery is at-least-once: after a relay crash an event may be redelivered.
+Never re-spawn a critic for a slice already `reviewing` (check `state.sh`), and
+make every routing action idempotent.
 
-## User decisions
+Then `state.sh ready`, dispatch each id from `state.sh next`, and when
+`state.sh done` exits 0, report what shipped and stop.
 
-`bin/coord approve|reject <unit> ["note"]`, `bin/coord msg <unit|-> "text"`,
-`bin/coord block|reopen|drop <unit> --reason "…"`. Block and drop stop the
-unit's live launch. Merge never happens without a recorded approval unless the
-user chose `autonomy=auto-merge`.
+You implement nothing and review nothing.
 
 ## Observe (do not improvise)
 
-`bin/coord status` is the sanctioned view: relay liveness, undelivered events,
-every unit with its state, round, readiness, and live pid, and the last log
-line of each live launch. `bin/coord log [<unit>]` is the full history;
-`bin/coord render` writes `COORDINATION.md`. Never `tail` a role log, `ps` for
-agents, or read `.coordinator/` files by hand.
+`scripts/status.sh` is the only sanctioned view of a run: relay liveness, queue
+depth, every slice with its pid's liveness, and the tail of each live role log.
+When the loop looks stalled, run `status.sh` and act on the protocol — never
+`tail` a role log, `ps` for agents, or read markers by hand. Improvised polling
+is how state diverges from the ledger.
+
+## Adapters (optional launch)
+
+`config.conf:adapters` (empty = core `setsid`). Each `adapters/<name>.sh`
+defines `adapter_launch <cwd> <log> <argv…>` echoing a pid; `spawn.sh` sources
+enabled adapters first, then falls back to core. Adapters may add visibility or
+supervision and MUST NOT change delivery, the finish protocol, or routing.
 
 ## Hard rules
 
-- Route on the event line only; never read a worker's diff. The critic is the
-  only content reviewer.
-- Workers never commit; the coordinator's `merge` commits the exact reviewed
-  state with the user's git identity, after the engine re-ran VERIFY.
-- Workers run with full permissions inside their worktree; the critic's
-  evidence, the reviewed-state binding, and the approval-gated merge are the gate.
-- Never write a slug, a round, or a critic brief yourself.
-- Workers see only their brief; critics see only the criteria and the code.
+- Route on the event line and the verdict only; never read a worker's diff.
+- The coordinator is the only one that manages git in the repo: workers stage
+  (`git add -A`, including new files) and NEVER commit or push; critics never
+  commit. The coordinator authors every commit with the user's git identity on
+  an approved PASS, then merges and pushes.
+- Workers run with FULL permissions (each harness's native bypass flag is in
+  its exec recipe). The worktree plus the brief confine the worker; the
+  critic's reviewed-state binding and the approval-gated merge are the gate.
+- Merge only after a PASS bound to the exact reviewed worktree state plus
+  recorded user approval.
+- Corrections go to the SAME worker; a new round uses a new slug.
+- Observe only through `status.sh`/`state.sh`; never poll logs or processes.
+- One issue, one worktree, one branch per slice. The user's git identity only.
+- Workers see only their brief; critics see diff + criteria + design ref.
