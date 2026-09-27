@@ -5,13 +5,17 @@ agent cuts a goal into typed units, workers build them in isolated git
 worktrees, independent critics review them against evidence rules, and the
 engine merges only approved work whose checks it re-runs itself.
 
-[SPEC-v2.md](SPEC-v2.md) is the design. The engine is bash (`bin/coord`, with
+[SPEC-v2.md](SPEC-v2.md) is the design; `bin/coord help` is the command
+reference. The engine is bash (`bin/coord`, with
 `lib/` and `libexec/`): nothing to build or install beyond bash 4.4+,
 coreutils, util-linux, awk and git. No `tmux`, `python`, or `node`, and one
 installed agent harness (codex, claude, pi, opencode, …) is enough.
 
 ## How it works
 
+- **A lean skill over a self-describing CLI.** `SKILL.md` holds only the
+  coordinator's judgment; `coord help` documents every command, and every
+  wake tells the coordinator what to do next.
 - **Units and playbooks.** `coord unit add <id> --kind feature|bugfix|refactor|chore`.
   The kind's playbook (`playbooks/<kind>.md`, overridable per repo) sets the
   brief fields a worker needs, what worker and critic are told, the evidence a
@@ -19,9 +23,10 @@ installed agent harness (codex, claude, pi, opencode, …) is enough.
 - **One event log.** `.coordinator/events.log` is the only state. Every write
   is checked against the unit state machine (`lib/model.awk`); illegal moves
   are refused, not recorded.
-- **Dispatch.** `coord dispatch <id> --role worker --brief <file>` validates
-  the brief, creates the worktree, computes the round and finish slug, and
-  launches the harness detached. `--role critic` writes the critic's brief
+- **Dispatch.** `coord brief <id>` drafts the brief to fill in;
+  `coord dispatch <id> --role worker` validates it, creates the worktree,
+  computes the round and finish slug, and launches the harness detached.
+  Every role reports with `coord finish`, which wakes the coordinator. `--role critic` writes the critic's brief
   from the worker brief's criteria — never the coordinator's framing.
 - **Evidence.** A critic's pass carries a level (`none < typecheck < tests <
   live`), the commands it ran, and flags such as `red-green`; below the
@@ -31,12 +36,13 @@ installed agent harness (codex, claude, pi, opencode, …) is enough.
   then it commits with the user's identity and merges locally. Publishing is
   a separate `git push` decision.
 - **Relay.** `coord relay` wakes the coordinator with one batch per wave of
-  events, reports dead launches, kills launches past their timebox, and blocks
-  a unit that dies twice in a round.
-- **Shapes.** `shapes/` holds light recipes the coordinator picks from: swarm
-  (parallel units), arena (competing attempts, a judge picks one), interrogate
-  (extra reviewers on risky units). Small jobs skip the ceremony, and
-  reversible questions become gates with a default instead of blocking.
+  events, each ending in the next step for every unit (`NEXT`, `READY`,
+  `DONE`); it reports dead launches, kills launches past their timebox, and
+  blocks a unit that dies twice in a round.
+- **Shapes.** Independent units run in parallel by default; `shapes/` adds
+  arena (competing attempts, a judge picks one) and interrogate (extra
+  reviewers on risky units). Small jobs skip the ceremony, and reversible
+  questions become gates (`coord gate`) with a default instead of blocking.
 - `SKILL.md` is what the coordinator agent loads; `agents/` are the role
   preambles; `adapters/` are optional launch overrides (tmux).
 

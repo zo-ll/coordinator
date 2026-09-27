@@ -2,7 +2,7 @@
 
 Repo: https://github.com/zo-ll/coordinator. Read `SPEC-v2.md` (the engine; see
 "Delivery in tmux"), `SKILL.md` (what the coordinator agent does) and
-`HARNESSES.md` (how real agent harnesses behave).
+`docs/harnesses.md` (how real agent harnesses behave).
 
 This follows your `coord watch v2` design. Keep what worked: the needs-you box
 that only exists when something is waiting, rows that read as sentences

@@ -1,32 +1,18 @@
 # Shape: interrogate
 
 Extra independent reviewers on a unit that passed, before the user is asked
-to approve it. Agreement between reviewers is the signal.
+to approve it. For changes where a miss is expensive (security, migrations,
+concurrency, money) or when the user asks to stress-test one. Not for every
+unit: the critic is the review.
 
-**Use when** a unit is risky enough that one critic isn't enough: security,
-data migrations, concurrency, money, anything hard to undo after merge. Also
-when the user asks to "stress test" or "tear apart" a change.
-
-**How**
-
-1. When the unit is `passed`, ask two or three reviewers, each a read-only
-   helper (your harness's native subagents if it has them, on different
-   models if it allows; else `coord research` launches). Give each the unit's
-   worktree and its criteria (GOAL, SCOPE, ACCEPTANCE), ask for concrete
-   defects only (location, failure mode, smallest fix), and a different
-   focus: correctness, concurrency and failure paths, security and data
-   safety. Reviewers only read and run; they never edit.
-2. Read the reports (they are findings, not diffs). Sort them:
-   - **act on**: raised by two or more reviewers (the critic counts as one),
-     or a single proven defect with a failing command;
-   - **consider**: plausible, raised once, no proof;
-   - **dismiss**: style, preference, out of SCOPE.
-3. If anything is *act on*: `coord reject <unit> "<the findings>"` (this puts
-   them in the log, whoever the reviewers were), then write
-   a correction brief that lists each finding with its location. The next
-   round gets a fresh critic as usual.
-4. Otherwise report to the user: the unit passed review and interrogation,
-   with the *consider* items listed, and ask for approval.
-
-**Don't** interrogate every unit; it multiplies cost. The critic is the
-review; interrogation is for the few units where a miss is expensive.
+1. When the unit is `passed`, ask two or three read-only reviewers (helpers,
+   on different models if you can), each given the worktree, GOAL, SCOPE,
+   and ACCEPTANCE and a different focus: correctness; concurrency and
+   failure paths; security and data safety. Concrete defects only: location,
+   failure mode, smallest fix.
+2. Sort the findings: **act on** what two reviewers raised (the critic
+   counts as one) or one proved with a failing command; **consider** the
+   plausible single ones; **dismiss** style and out-of-SCOPE.
+3. Anything to act on: `coord reject <unit> "<the findings>"`, then a
+   correction brief listing each one. Otherwise ask the user to approve,
+   listing the *consider* items.

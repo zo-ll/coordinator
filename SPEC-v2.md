@@ -1,6 +1,7 @@
 # coordinator v2
 
-Status: implemented; the migration from v1 ([SPEC.md](SPEC.md)) is complete.
+Status: implemented; the migration from v1 is complete (the v1 design is in
+git history).
 Decisions made during implementation are recorded under Decisions.
 
 ## Problem Statement
@@ -94,11 +95,13 @@ Everything a run creates lives in `<repo>/.coordinator/`:
 | Path | Contents | Writer |
 |---|---|---|
 | `events.log` | append-only event log, the source of truth, including delivery state | `coord` under `events.log.lock` |
-| `config.conf` | repo choices (v1 format, committed) | `coord apply` |
-| `standing.md` | standing orders (committed) | the coordinator / user |
+| `config.conf` | repo choices (v1 format, committed) | `coord init` |
+| `standing.md` | standing orders (committed) | `coord standing add` |
 | `playbooks/*.md` | repo playbook overrides (committed) | the user |
-| `.gitignore` | ignores everything here except the three above | `coord start` |
-| `session` | coordinator session id | `coord start` |
+| `.gitignore` | ignores everything here except the three above | `coord init` |
+| `session` | coordinator session id | `coord init` |
+| `gates.tsv` | gates: id, status, question, options, default, answer | `coord gate` |
+| `briefs/<id>.draft.md` | the unit's next worker brief being filled in | `coord brief` |
 | `briefs/<slug>.md`, `briefs/<slug>.brief.md` | each launch's full prompt; each worker's raw brief | `coord dispatch` |
 | `worktrees/<id>/` | the unit's worktree, branch `coord/<id>` | `coord dispatch` |
 | `log/<slug>.log`, `log/<id>.verify.log`, `log/relay.log` | launch output, merge VERIFY output, relay output | `coord` |
@@ -110,8 +113,8 @@ The log is found as `$COORD_EVENTS`, else the nearest
 `./.coordinator/events.log`. Dispatch passes `COORD_EVENTS` to every role,
 in its environment and in the finish-contract line; `finish` never creates a
 log it was not pointed at.
-`COORDINATION.md` is generated. The v1 queue, ledger, and journal are gone:
-all three are views of the event log.
+The v1 queue, ledger, and journal are gone: all three are views of the event
+log.
 
 ### Events
 
@@ -219,7 +222,10 @@ briefs (critic briefs are engine-written); a researcher brief requires `GOAL`.
 A brief is a file of `FIELD:` sections, each starting at the beginning of a
 line and running to the next field. `coord dispatch` refuses a brief missing
 any field the playbook requires, printing `REFUSED <unit> brief: missing
-<FIELD…>`. `TIMEBOX:` in the brief overrides the playbook default. The launched
+<FIELD…>`, and one that still holds a `<fill: …>` placeholder. `coord brief
+<id>` drafts the next one: the playbook's fields as placeholders for a first
+round, the last brief plus `CORRECTION:` for a later one; `dispatch --role
+worker` without `--brief` uses the draft and removes it once launched. `TIMEBOX:` in the brief overrides the playbook default. The launched
 prompt is: role preamble, playbook section for the role, brief, standing
 orders, finish contract. The finish contract is generated and last.
 
@@ -359,38 +365,33 @@ harness or tool becomes a dependency:
 ### CLI
 
 Every command prints one line (or one line per item for listings) and exits
-nonzero on failure.
+nonzero on failure. `coord help [<verb>]` documents each one; it is the
+reference, so SKILL.md does not repeat flags or output formats.
 
-| command | replaces (v1) |
-|---|---|
-| `coord detect`, `coord plan`, `coord apply` | `detect.sh`, `plan.sh`, `apply.sh` |
-| `coord start [--session <id>]` | `coord.sh` |
-| `coord unit add <id> --kind <k> --goal "<g>" [--deps a,b] [--risk <r>]` | `state.sh add` |
-| `coord unit next` | `state.sh ready` + `next` |
-| `coord dispatch <id> --role worker --brief <file>` | `worktree.sh` + `spawn.sh` (creates the worktree if absent) |
-| `coord dispatch <id> --role critic` | `spawn.sh --role critic` (engine writes the brief) |
-| `coord research --brief <file>` | `spawn.sh --role researcher` |
-| `coord finish --result <r> [--evidence <l>] [--ran "<cmd>"]… [--flag <f>]… --summary "<s>"` | `finish.sh` (slug from `COORD_OWES`, set at dispatch) |
-| `coord approve\|reject\|msg <id> ["<text>"]` | `coord.sh approve\|reject\|msg` |
-| `coord merge <id>` | `merge.sh` |
-| `coord block\|reopen\|drop <id> --reason "<r>"` | `state.sh blocked\|drop` |
-| `coord status`, `coord render`, `coord log [<id>]`, `coord done` | `status.sh`, `state.sh render\|list\|done` |
-| `coord relay` | `relay.sh` |
+- Coordinator: `init`, `unit add`, `brief`, `dispatch`, `research`,
+  `approve`, `reject`, `msg`, `block`, `reopen`, `drop`, `merge`, `gate`,
+  `standing`, `status`, `log`.
+- Role agents: `finish`, the only way a worker, critic, or researcher reports
+  and wakes the coordinator.
+- Plumbing, used by `init` and the relay: `detect`, `plan`, `apply`, `start`,
+  `relay`, `cfg`, `unit next`, `done`.
 
-### Coordinator routing (SKILL.md)
+### Next steps (the engine routes, the coordinator acts)
 
-For each event in a batch:
+A batch lists its events, then what to do now:
 
-- `finished` worker `done` → `coord dispatch <id> --role critic`.
-- `finished` critic `pass` → the unit is `passed`; ask the user, or merge under `auto-merge`.
-- `finished` critic `handback`, `converted`, `verify_failed`, or worker
-  `partial` → write a correction brief; `coord dispatch <id> --role worker`.
-- `died` → `coord status`; dispatch the same role again.
-- `blocked` (by the engine) → tell the user.
-- `approved` → `coord merge <id>`. `rejected`/`msg` → act on the text.
+- `NEXT <unit>: <action>`, one per unit in the batch, from the unit's
+  **current** state rather than the event, so a redelivered event never
+  repeats a step: `built` → dispatch the critic; `passed` → ask the user
+  (merge directly under `auto-merge`); `approved` → merge; `handback` →
+  `coord brief` for a correction, then dispatch the worker; `stalled` →
+  dispatch the same role; `blocked` → tell the user. The engine never tells
+  the coordinator to approve without asking.
+- `NEXT <seq>: …` for a unit-less event (a research report, a message).
+- `READY <ids>`, `DONE`, and `GATES <ids> open`.
 
-Then `coord unit next`, dispatch each ready unit, and stop when `coord done`
-exits 0.
+`merge` and `drop` also print `READY` and `DONE`: the readiness or completion
+they cause is not a wake event, so without it a run would stall after a merge.
 
 ### Hard rules retained from v1
 
@@ -503,6 +504,12 @@ Made during implementation (2026-09-27):
     (see Optional capabilities). This recovers most of the lightness of
     platforms that provide spawning and notification (pstack on Cursor)
     without depending on any harness.
+
+13. **The CLI carries the protocol; the skill carries judgment.** Routing,
+    boot, brief fields, gates, and standing orders moved from SKILL.md into
+    `coord` (next steps in each batch, `init`, `brief`, `gate`, `standing`,
+    `help`), so the skill is only what the engine cannot decide. `render` was
+    dropped; `status` is the view.
 
 ## Open Questions
 
