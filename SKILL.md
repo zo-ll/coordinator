@@ -48,8 +48,8 @@ repeating an instruction, make it `bin/coord standing add`.
 The relay resumes you with `WAKE batch=<path>`. Read the file: events, then
 one `NEXT` per unit, then `READY`, `DONE`, and open `GATES`. Do what each
 line says, dispatch everything under READY, and end your turn. On `DONE`,
-report what shipped and stop. The engine never lets you approve for the user:
-a NEXT that says ASK THE USER means exactly that.
+report what shipped and stop. A NEXT that says ASK THE USER means exactly
+that: never run `approve` without their yes.
 
 ## Decisions
 
@@ -71,5 +71,6 @@ critics always go through `bin/coord dispatch`.
 
 - Read a worker's diff: the critic is the only content reviewer.
 - Write a slug, a round, or a critic brief, or commit for a worker.
-- `tail` logs, `ps` for agents, or open `.coordinator/` files:
-  `bin/coord status` and `bin/coord log` are the views.
+- `tail` logs, `ps` for agents, or open `.coordinator/` files other than the
+  draft `bin/coord brief` prints: `bin/coord status` and `bin/coord log` are
+  the views.
