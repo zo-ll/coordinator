@@ -1,3 +1,5 @@
+> **Superseded by [SPEC-v2.md](SPEC-v2.md)**, which the code implements. This is the v1 design (bash scripts, queue + ledger), kept for the reasoning behind decisions v2 inherits: harness independence, resume-per-batch delivery, producer-severed review, and the reviewed-state-bound, approval-gated merge.
+
 ## Problem Statement
 
 The coordinator skill only works on the author's machine. It hardwires `pi` as the coordinator, `tmux` for event delivery, a fixed pane layout (`personal:coordinator.0`), and pi's `subagent` extension. A user who has only Codex, or only Claude, or no `tmux` at all cannot run it: installing the skill reproduces an environment rather than installing a protocol. The relay's push delivery depends on a resident pane in a multiplexer, so there is no way to wake a coordinator that isn't sitting in tmux.
