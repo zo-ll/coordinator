@@ -14,8 +14,9 @@ questions in parallel.
    Give each unit exclusive SCOPE; two units writing the same file is a race,
    not a swarm.
 2. Dispatch every ready unit in the same turn.
-3. For questions, send one `coord research` per question, each with its own
-   GOAL, instead of one researcher with a long list.
+3. For questions, one helper per question, each with its own GOAL, instead of
+   one helper with a long list. Use your harness's native subagents if it has
+   them (answers come back in this turn), else one `coord research` each.
 4. Report once, when the wave is done: what merged, what came back, what is
    waiting on the user. Don't narrate each unit as it lands.
 

@@ -72,6 +72,26 @@ its file in `shapes/` (next to this skill), and follow it:
 Shapes combine: a program can swarm most units, arena its core API, and
 interrogate its migration. Name the shape you picked in your report.
 
+## Helpers: native subagents for short read-only work
+
+Shapes ask for **helpers**: an arena judge, interrogation reviewers, a quick
+research question. If your harness has its own subagent tool (Claude Code's
+Task tool, opencode's subagents, pi's subagent extension), use it for these:
+the answer comes back inside this turn, with no dispatch and no wake. If it
+has none, use `bin/coord research`, which works everywhere.
+
+A native subagent is only for work that **writes nothing**:
+
+- tell it plainly: read and run commands only, edit no files, commit nothing;
+- it may read diffs and worktrees, and you read only its verdict, as with a
+  critic;
+- record what it decided through the command you act on (a drop reason, a
+  reject note, a correction brief), so the log still explains the run.
+
+Workers and critics are never native subagents: they need their own
+worktree, must survive your turn ending, and are gated by evidence and merge.
+Those always go through `bin/coord dispatch`.
+
 ## Units
 
 `bin/coord unit add <id> --kind <kind> --goal "<goal>" [--deps a,b] [--risk risky]`

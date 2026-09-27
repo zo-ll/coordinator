@@ -19,13 +19,15 @@ candidate.
    merged and the losers are dropped.
 3. Dispatch all candidates. Each gets its own critic as usual. A candidate
    the critic hands back can get a correction round, or be left to lose.
-4. When the passed candidates are in, send a **judge**: `coord research` with
-   a brief that names each candidate's worktree (from the `DISPATCHED` lines)
-   and asks it to score them against ACCEPTANCE, pick one to build on, and
-   list what is worth taking from the others. You never read the diffs; the
-   judge does.
+4. When the passed candidates are in, ask a **judge**: a read-only helper
+   (your harness's native subagent if it has one, else `coord research`)
+   given each candidate's worktree (from the `DISPATCHED` lines) and asked to
+   score them against ACCEPTANCE, pick one to build on, and list what is worth
+   taking from the others. You never read the diffs; the judge does.
 5. Ask the user to approve the winner (it merges like any unit), then
-   `coord drop <loser> --reason "arena: <winner> chosen"` for the others.
+   `coord drop <loser> --reason "arena: <winner> chosen: <judge's one-line why>"`
+   for the others, so the decision is in the log even when the judge was a
+   native subagent.
 6. If the judge found ideas worth keeping, add one small follow-up unit
    (`--deps <winner>`) whose brief describes them. Paste the judge's points
    into CONTEXT; the worker can't see the losing worktrees' reasoning.

@@ -336,6 +336,25 @@ when `coord start` runs inside tmux), wakes land in that window instead:
 
 Without tmux (CI, native Windows), delivery falls back to the headless resume.
 
+### Optional capabilities
+
+The engine requires nothing but bash and a harness that can run headless.
+Two capabilities make it lighter when present, and each has a fallback so no
+harness or tool becomes a dependency:
+
+- **A terminal multiplexer** (tmux, zellij, wezterm, kitty, screen, …),
+  through a per-multiplexer adapter: wakes typed into the coordinator's pane,
+  agents in their own panes, the watch panel's popups and menus. Fallback:
+  headless resume and a panel-only watch (see `docs/watch-bash-brief.md`).
+- **Native subagents** in the coordinator's harness (Claude Code's Task tool,
+  opencode subagents, pi's subagent extension): used only for short,
+  read-only helpers (an arena judge, interrogation reviewers, research
+  questions), whose answers return inside the coordinator's turn. Fallback:
+  `coord research`. Workers and critics always go through `coord dispatch`,
+  because they need a worktree, outlive the turn, and are gated by evidence
+  and merge. A helper's outcome reaches the log through the command the
+  coordinator acts with (a drop reason, a reject note, a correction brief).
+
 ### CLI
 
 Every command prints one line (or one line per item for listings) and exits
@@ -478,6 +497,11 @@ Made during implementation (2026-09-27):
     machine lives in `lib/model.awk`. Dispatch launches the agent inside the
     log transaction that records it, so a fast agent's `finish` can never
     arrive before its `dispatched`.
+
+12. **Native subagents are an optional capability for read-only helpers**
+    (see Optional capabilities). This recovers most of the lightness of
+    platforms that provide spawning and notification (pstack on Cursor)
+    without depending on any harness.
 
 ## Open Questions
 
