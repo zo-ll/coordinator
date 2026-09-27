@@ -304,6 +304,32 @@ Delivery stays at-least-once: a relay crash between `claimed` and `acked`
 leaves the batch claimed; on restart the relay appends `nacked` and
 delivers it again. Resume retries and give-up behavior are v1's.
 
+### Delivery in tmux (planned; the default once built)
+
+The coordinator is the user's own harness session, and its window is the
+coordinator's UI. The headless resume above wakes it in a hidden background
+process, so after boot the visible window goes stale. With tmux (the default
+when `coord start` runs inside tmux), wakes land in that window instead:
+
+- `coord start` records the coordinator's tmux pane id (`%12`, not a window
+  name) in `.coordinator/`.
+- The relay delivers a batch by typing one line into that pane:
+  `tmux send-keys -t <pane> -l 'WAKE batch=<path>'`, then `Enter`. It types
+  only when the pane's input line is empty (`tmux capture-pane`), so it never
+  garbles what the user is typing.
+- **Delivery is acknowledged by the coordinator**, not by a process exit: the
+  first command of every turn is `coord ack <batch>`, which appends `acked`.
+  With no ack within `relay.ack_timeout` (default 30s), the relay inspects the
+  pane; a dialog on screen becomes a needs-you event, otherwise it retypes
+  once, then nacks and reports. A missing pane is reported the same way.
+- Each worker, critic, and researcher launch runs headless in its own tmux
+  window, output streaming to its log as today, so attaching is
+  `tmux select-window`.
+- `coord watch` runs in a pane beside the coordinator: everything that is not
+  the coordinator (units, launches, what needs the user).
+
+Without tmux (CI, native Windows), delivery falls back to the headless resume.
+
 ### CLI
 
 Every command prints one line (or one line per item for listings) and exits
@@ -432,6 +458,11 @@ Made during implementation (2026-09-27):
 9. **A launch the state machine refuses to record is killed.** `dispatch`
    launches, then commits the `dispatched` event; if a concurrent change makes
    it illegal, the new process group gets SIGTERM.
+
+10. **tmux is the default delivery** (planned; see Delivery in tmux): the
+    harness window stays the coordinator for the whole run, wakes are typed
+    into it and acknowledged with `coord ack`, and launches get their own tmux
+    windows. Headless resume stays as the fallback.
 
 ## Open Questions
 
