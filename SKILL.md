@@ -5,7 +5,7 @@ description: >-
   units of work, dispatches one worker per unit on an isolated git worktree,
   has an independent critic review each result against evidence rules, and
   merges only approved work whose checks the engine re-runs itself.
-  Harness-agnostic, one static binary: a single installed harness is enough,
+  Harness-agnostic, plain bash: a single installed harness is enough,
   and no tmux, python, or node is required. Use for multi-part work spanning
   multiple files/areas, or on "coordinate"/"delegate"/"dispatch".
 ---

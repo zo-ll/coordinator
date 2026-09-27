@@ -21,7 +21,7 @@ a state machine, a dependency graph, or ranked evidence.
 ## Solution
 
 Keep v1's delivery guarantees and its harness independence. Add a small domain
-layer the engine enforces, and move the engine to one static Go binary.
+layer the engine enforces, in bash (see Decisions 11).
 
 - **Unit.** Today's slice, plus a `kind` and a `risk`. Round and owed finish
   slug are computed by the engine, never passed by the coordinator.
@@ -31,7 +31,7 @@ layer the engine enforces, and move the engine to one static Go binary.
 - **Evidence.** A critic's `pass` carries a ranked evidence level and the
   commands run, bound to a state hash the engine computes itself. A pass below
   the playbook's floor is converted to a handback by the engine.
-- **Event log.** One append-only `events.jsonl` is the only source of truth.
+- **Event log.** One append-only `events.log` is the only source of truth.
   Unit state is a replay of it; every append is checked against a transition
   table under one lock, so an illegal transition is refused, not recorded.
 - **Mechanical review inputs.** The engine writes the critic's brief from the
@@ -79,11 +79,12 @@ transitions, timeouts, and retry caps are code.
 
 ### Runtime and install
 
-One static Go binary, `coord`, with subcommands. Standard library only (no
-cgo). `bin/install.sh` builds it when `go` is on `PATH` (release binaries for
-machines without Go are not built yet); the repo is still symlinked into each
-harness's skill dir, so SKILL.md, playbooks, and agents stay live on `git pull`,
-and `bin/coord` rebuilds itself when a Go source is newer than it.
+`bin/coord`, a bash script with subcommands: `lib/core.sh` (paths, the locked
+append, queries, launch, the state hash), `lib/cmd.sh` (the commands),
+`lib/model.awk` (the state machine), `libexec/` (cfg, detect, plan, apply).
+Runtime: bash 4.4+, coreutils, util-linux (`flock`, `setsid`), awk, git; nothing
+to build. The repo is symlinked into each harness's skill dir, so everything
+stays live on `git pull`.
 Linux and WSL only, as in v1.
 
 ### Storage
@@ -92,7 +93,7 @@ Everything a run creates lives in `<repo>/.coordinator/`:
 
 | Path | Contents | Writer |
 |---|---|---|
-| `events.jsonl` | append-only event log, the source of truth, including delivery state | `coord` under `events.jsonl.lock` |
+| `events.log` | append-only event log, the source of truth, including delivery state | `coord` under `events.log.lock` |
 | `config.conf` | repo choices (v1 format, committed) | `coord apply` |
 | `standing.md` | standing orders (committed) | the coordinator / user |
 | `playbooks/*.md` | repo playbook overrides (committed) | the user |
@@ -105,8 +106,8 @@ Everything a run creates lives in `<repo>/.coordinator/`:
 | `relay.lock`, `relay.pid` | one relay per run | `coord relay` |
 
 The log is found as `$COORD_EVENTS`, else the nearest
-`.coordinator/events.jsonl` at or above the working directory, else
-`./.coordinator/events.jsonl`. Dispatch passes `COORD_EVENTS` to every role,
+`.coordinator/events.log` at or above the working directory, else
+`./.coordinator/events.log`. Dispatch passes `COORD_EVENTS` to every role,
 in its environment and in the finish-contract line; `finish` never creates a
 log it was not pointed at.
 `COORDINATION.md` is generated. The v1 queue, ledger, and journal are gone:
@@ -114,7 +115,12 @@ all three are views of the event log.
 
 ### Events
 
-Each line is one JSON object: `seq` (1, 2, …, no gaps), `ts` (UTC), `unit`
+Each line is one event: tab-separated `key=value` fields — `seq` (1, 2, …, no
+gaps), `ts` (epoch seconds), `type`, `unit` (empty for run-level events), then
+the type's fields (repeated keys, e.g. `ran=`, form lists) — ending with a lone
+`.` field. A line without the terminator is a torn write: readers skip it and
+the next append cuts it off. Values never contain tabs or newlines (the writer
+replaces them with spaces). Fields (was: one JSON object each): `seq`, `ts`, `unit`
 (empty for run-level events), `type`, and type-specific fields.
 
 | type | fields | written by | wakes coordinator |
@@ -377,14 +383,14 @@ sourced or executed.
 
 ## Testing Decisions
 
-- **Transition table**: Go table tests, one row per legal move and one per
+- **Transition table**: `test/model.test.sh`, one row per legal move and one per
   refused move, asserting the resulting state or the `REFUSED` reason.
 - **Replay**: a log replays to the same projection as the incremental state;
   a truncated final line (crash mid-write) is ignored and the next append
   repairs it.
 - **Black-box CLI suite**: the v1 approach kept — temp repo, fake harness on
   `PATH`, assertions on exit status, the one output line, and files. The v1
-  suite runs against the Go binary unchanged through phase A.
+  suite ran against the Go binary unchanged through phase A, and against the bash engine after the port back.
 - **Concurrency**: N fake workers finish at once; every `finished` appears once,
   seqs are gapless, and the relay performs one resume containing all N.
 - **Evidence**: a pass below the floor, without `--ran`, or missing a required
@@ -406,7 +412,7 @@ Callers first, then delete the old path.
 1. **Port 1:1.** *(done)* `coord` implements the v1 CLI contracts; `scripts/*.sh` become
    one-line shims (`exec coord <verb> "$@"`). Done when the v1 suite passes
    unchanged against the binary.
-2. **Event log.** *(done)* Replace the queue, ledger, and journal with `events.jsonl`
+2. **Event log.** *(done)* Replace the queue, ledger, and journal with `events.log`
    behind the same commands. v1 suite still green. (Queue delivery is the
    `enqueued`/`claimed`/`acked`/`nacked` events; tests that read queue files
    now assert through `queue depth` and batch contents; `ENQUEUED` prints
@@ -463,6 +469,15 @@ Made during implementation (2026-09-27):
     harness window stays the coordinator for the whole run, wakes are typed
     into it and acknowledged with `coord ack`, and launches get their own tmux
     windows. Headless resume stays as the fallback.
+
+11. **The engine is bash, not Go.** After the v2 model was built in Go, the
+    engine was ported back to bash so the skill needs nothing but tools already
+    on a Linux system and stays editable in place. The CLI contract was kept
+    exactly, so the same black-box suite verifies it; the log became
+    line-based (`events.log`, see Events) so awk can parse it; the state
+    machine lives in `lib/model.awk`. Dispatch launches the agent inside the
+    log transaction that records it, so a fast agent's `finish` can never
+    arrive before its `dispatched`.
 
 ## Open Questions
 

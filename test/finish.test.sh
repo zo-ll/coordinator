@@ -25,7 +25,7 @@ assert "$(fin f1.r1.worker --result done --summary again)" "DUP f1.r1.worker"
 # a critic pass at the floor passes and records the engine's state hash
 "$COORD" dispatch f1 --role critic >/dev/null
 assert "$(fin f1.r1.critic --result pass --evidence tests --ran 'go test ./...' --summary good)" "FINISHED f1.r1.critic -> passed"
-hash="$(grep '"type":"finished".*"slug":"f1.r1.critic"' "$COORD_EVENTS" | sed -E 's/.*"state":"([0-9a-f]+)".*/\1/')"
+hash="$(grep $'\ttype=finished\t' "$COORD_EVENTS" | grep $'\tslug=f1.r1.critic\t' | sed -E 's/.*\tstate=([0-9a-f]+)\t.*/\1/')"
 [ "${#hash}" = 64 ] || { echo "  no state hash recorded: $hash"; exit 1; }
 
 # below the floor, no --ran, a missing required flag: each converts to handback

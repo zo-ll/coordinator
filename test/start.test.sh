@@ -13,7 +13,7 @@ assert "$out" "SESSION test-sess source=user harness=codex repo=$REPO"
 assert "$(cat .coordinator/session)" "test-sess"
 # run state is ignored, committed choices are not
 git log --oneline | grep -q 'ignore run state in .coordinator/' || { echo "  .coordinator/.gitignore not committed"; exit 1; }
-git check-ignore -q .coordinator/events.jsonl || { echo "  event log not ignored"; exit 1; }
+git check-ignore -q .coordinator/events.log || { echo "  event log not ignored"; exit 1; }
 git check-ignore -q .coordinator/worktrees/x/file || { echo "  worktrees not ignored"; exit 1; }
 if git check-ignore -q .coordinator/config.conf; then echo "  config.conf ignored"; exit 1; fi
 if git check-ignore -q .coordinator/playbooks/feature.md; then echo "  playbooks ignored"; exit 1; fi

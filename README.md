@@ -5,8 +5,9 @@ agent cuts a goal into typed units, workers build them in isolated git
 worktrees, independent critics review them against evidence rules, and the
 engine merges only approved work whose checks it re-runs itself.
 
-[SPEC-v2.md](SPEC-v2.md) is the design. The engine is one static Go binary,
-`bin/coord` (standard library only) — no `tmux`, `python`, or `node`, and one
+[SPEC-v2.md](SPEC-v2.md) is the design. The engine is bash (`bin/coord`, with
+`lib/` and `libexec/`): nothing to build or install beyond bash 4.4+,
+coreutils, util-linux, awk and git. No `tmux`, `python`, or `node`, and one
 installed agent harness (codex, claude, pi, opencode, …) is enough.
 
 ## How it works
@@ -15,8 +16,8 @@ installed agent harness (codex, claude, pi, opencode, …) is enough.
   The kind's playbook (`playbooks/<kind>.md`, overridable per repo) sets the
   brief fields a worker needs, what worker and critic are told, the evidence a
   pass needs, and the timebox.
-- **One event log.** `.coordinator/events.jsonl` is the only state. Every write
-  is checked against the unit state machine (`internal/model`); illegal moves
+- **One event log.** `.coordinator/events.log` is the only state. Every write
+  is checked against the unit state machine (`lib/model.awk`); illegal moves
   are refused, not recorded.
 - **Dispatch.** `coord dispatch <id> --role worker --brief <file>` validates
   the brief, creates the worktree, computes the round and finish slug, and
@@ -37,13 +38,12 @@ installed agent harness (codex, claude, pi, opencode, …) is enough.
 ## Install
 
 ```sh
-bin/install.sh              # build bin/coord (needs go), symlink this repo as <harness>/coordinator
+bin/install.sh              # symlink this repo as <harness>/coordinator
 bin/install.sh --uninstall  # remove those symlinks
 ```
 
 The repo root is the skill, symlinked into every harness skill dir found on
-the machine. `bin/coord` rebuilds itself when a Go source is newer than it and
-`go` is on `PATH`, so `git pull` stays live.
+the machine, so edits and `git pull` stay live.
 
 ## Tests
 
@@ -51,6 +51,6 @@ the machine. `bin/coord` rebuilds itself when a Go source is newer than it and
 test/run.sh
 ```
 
-Vets and builds, runs the Go unit tests (the state machine's transition table,
-playbook and brief parsing), then each `test/*.test.sh` against the binary in
-its own temp repo with a fake harness. No network, no real agents.
+Each `test/*.test.sh` drives `bin/coord` in its own temp repo with a fake
+harness; `model.test.sh` is the state machine's transition table. No network,
+no real agents.

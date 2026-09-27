@@ -4,7 +4,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 setup_run
-seqs() { sed -E 's/^\{"seq":([0-9]+),.*/\1/' "$COORD_EVENTS" | paste -sd' ' -; }
+seqs() { sed -E 's/^seq=([0-9]+)\t.*/\1/' "$COORD_EVENTS" | paste -sd' ' -; }
 
 for i in $(seq 1 15); do
   "$COORD" unit add "u$i" --kind chore --goal "unit $i" >/dev/null &
@@ -19,12 +19,13 @@ refuses "id already exists" "$COORD" unit add u1 --kind chore --goal again
 assert "$(wc -l < "$COORD_EVENTS" | tr -d ' ')" "30"
 
 # a torn final line (crash mid-write) is invisible to readers...
-printf '{"seq":31,"ts":"x","type":"unit_ad' >> "$COORD_EVENTS"
+# (complete-looking fields, but no terminator: it was cut mid-write)
+printf 'seq=31\tts=x\ttype=unit_added\tunit=ghost\tkind=chore' >> "$COORD_EVENTS"
 assert "$("$COORD" unit next | wc -w | tr -d ' ')" "15"
 # ...and cut off by the next append, which takes seq 31
 "$COORD" unit add late --kind chore --goal late >/dev/null
 assert "$(seqs | tr ' ' '\n' | tail -n1)" "31"
-tail -n1 "$COORD_EVENTS" | grep -q '"unit":"late"' || { echo "  append did not land cleanly"; exit 1; }
-if grep -q 'unit_ad"\|unit_ad$' "$COORD_EVENTS"; then echo "  torn line survived"; exit 1; fi
+tail -n1 "$COORD_EVENTS" | grep -q $'\tunit=late\t' || { echo "  append did not land cleanly"; exit 1; }
+if grep -q 'unit=ghost' "$COORD_EVENTS"; then echo "  torn line survived"; exit 1; fi
 
 echo "  events ok"

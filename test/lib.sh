@@ -33,7 +33,7 @@ is_state() { [ "$(state_of "$1")" = "$2" ]; }
 setup_run() {
   export COORD_HOME="$TMP/home" COORD_ENV_CONF="$TMP/home/env.conf"
   export REPO="$TMP/repo"
-  export COORD_EVENTS="$REPO/.coordinator/events.jsonl"
+  export COORD_EVENTS="$REPO/.coordinator/events.log"
   export COORD_AGENTS="$TMP/no-agents"
   export FAKE_DIR="$TMP/fake"
   mkdir -p "$COORD_HOME" "$REPO" "$TMP/bin" "$FAKE_DIR"

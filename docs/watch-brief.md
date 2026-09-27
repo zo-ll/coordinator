@@ -73,9 +73,9 @@ them, and what needs the user.
 
 ## Constraints
 
-- Go and Bubble Tea (lipgloss, bubbles), one static binary.
+- Superseded: the engine and watch are bash; see `docs/watch-bash-brief.md`.
 - Keyboard-first; tmux-friendly (don't steal tmux's prefix key).
-- Watch only reads `.coordinator/events.jsonl` and launch logs; every action is
+- Watch only reads `.coordinator/events.log` and launch logs; every action is
   a `coord` command the engine may refuse.
 
 ## Deliverables

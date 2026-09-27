@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# coord: the coordinator engine. One subcommand per protocol step, one line
+# of output per result; refusals are "REFUSED <unit> <event>: <reason>".
+# bash 4.4+, coreutils, util-linux (flock, setsid), awk, git. See SPEC.md.
+set -euo pipefail
+
+src=${BASH_SOURCE[0]}
+while [ -L "$src" ] && command -v readlink >/dev/null 2>&1; do   # bin/coord symlinked elsewhere
+  t=$(readlink "$src"); case "$t" in /*) src=$t ;; *) src=${src%/*}/$t ;; esac
+done
+case "$src" in */*) ;; *) src=./$src ;; esac
+SKILL=$(cd -P "${src%/*}/.." && pwd)
+SELF="$SKILL/bin/coord"
+
+usage='usage: coord <apply|approve|block|cfg|detect|dispatch|done|drop|finish|log|merge|msg|plan|reject|relay|render|reopen|research|start|status|unit> ...'
+verb=${1:-}
+[ $# -gt 0 ] && shift
+
+# shellcheck source=../lib/core.sh
+. "$SKILL/lib/core.sh"
+
+case "$verb" in
+  cfg|detect|plan|apply)
+    export COORD_CONFIG="$CONFIG"
+    exec "$SKILL/libexec/$verb.sh" "$@" ;;
+esac
+
+# shellcheck source=../lib/cmd.sh
+. "$SKILL/lib/cmd.sh"
+
+case "$verb" in
+  unit)     cmd_unit "$@" ;;
+  dispatch) cmd_dispatch "$@" ;;
+  research) cmd_research "$@" ;;
+  finish)   cmd_finish "$@" ;;
+  approve)  cmd_decide approved approve "$@" ;;
+  reject)   cmd_decide rejected reject "$@" ;;
+  msg)      cmd_decide msg msg "$@" ;;
+  block)    cmd_decide blocked block "$@" ;;
+  reopen)   cmd_decide reopened reopen "$@" ;;
+  drop)     cmd_decide dropped drop "$@" ;;
+  merge)    cmd_merge "$@" ;;
+  relay)    cmd_relay "$@" ;;
+  status)   cmd_status "$@" ;;
+  render)   cmd_render "$@" ;;
+  log)      cmd_log "$@" ;;
+  done)     cmd_done "$@" ;;
+  start)    cmd_start "$@" ;;
+  "")       echo "$usage" >&2; exit 2 ;;
+  *)        echo "coord: unknown command \"$verb\"" >&2; echo "$usage" >&2; exit 2 ;;
+esac
