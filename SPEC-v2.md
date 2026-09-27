@@ -355,7 +355,7 @@ sourced or executed.
 
 Callers first, then delete the old path.
 
-1. **Port 1:1.** `coord` implements the v1 CLI contracts; `scripts/*.sh` become
+1. **Port 1:1.** *(done)* `coord` implements the v1 CLI contracts; `scripts/*.sh` become
    one-line shims (`exec coord <verb> "$@"`). Done when the v1 suite passes
    unchanged against the binary.
 2. **Event log.** Replace the queue, ledger, and journal with `events.jsonl`

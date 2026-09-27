@@ -2,9 +2,10 @@
 
 A harness-agnostic, script-driven, barebones multi-agent orchestration protocol.
 
-[SPEC.md](SPEC.md) is the design; the implementation lives in `scripts/` and is
-entirely **bash** — no `tmux`, `python`, or `node` required. One installed
-harness is enough.
+[SPEC.md](SPEC.md) is the design; the implementation is one static Go binary,
+`bin/coord` (built from `cmd/coord`), behind the `scripts/*.sh` contracts — no
+`tmux`, `python`, or `node` required. One installed harness is enough.
+[SPEC-v2.md](SPEC-v2.md) is the draft of what comes next.
 
 ## How it works
 
@@ -24,7 +25,7 @@ harness is enough.
 ## Install
 
 ```sh
-bin/install.sh              # symlink this repo as <harness>/coordinator
+bin/install.sh              # build bin/coord (needs go), symlink this repo as <harness>/coordinator
 bin/install.sh --uninstall  # remove those symlinks
 ```
 

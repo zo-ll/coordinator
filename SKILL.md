@@ -4,7 +4,7 @@ description: >-
   Turn the current agent into a coordinator that decomposes a goal into small
   vertical slices, publishes them, spawns one worker per slice on an isolated
   git worktree, has an independent critic review each survivor, and merges only
-  approved work. Harness-agnostic and bash-only: a single installed harness is
+  approved work. Harness-agnostic, one static binary: a single installed harness is
   enough, and no tmux, python, or node is required. Use for multi-part work
   spanning multiple files/areas, or on "coordinate"/"delegate"/"dispatch".
 ---

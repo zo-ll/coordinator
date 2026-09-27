@@ -1,13 +1,18 @@
 # coordinator
 
-Bash-only multi-agent orchestration protocol. See [SPEC.md](SPEC.md).
+Multi-agent orchestration protocol. See [SPEC.md](SPEC.md) (implemented) and
+[SPEC-v2.md](SPEC-v2.md) (draft; migration phase 1 done).
 
 ## Conventions
 
-- Every script is `#!/usr/bin/env bash` with `set -euo pipefail`.
-- Scripts print one short line and exit nonzero on failure. No `eval`.
-- Config and state are plain files; scripts are the only parsers.
-- No `python`, `node`, or `tmux` dependency in the core.
+- The engine is one Go binary, `cmd/coord` (standard library only, no cgo).
+  `scripts/<name>.sh` are shims that exec `bin/coord <verb>` via
+  `scripts/lib/exec.sh`, which rebuilds the binary when a Go source is newer.
+- Shell files are `#!/usr/bin/env bash` with `set -euo pipefail`.
+- Commands print one short line and exit nonzero on failure. No `eval`.
+- Config and state are plain files; `coord` is the only parser.
+- No `python`, `node`, or `tmux` dependency in the core; Go is needed only to
+  build.
 - Machine-local runtime state lives under `$COORD_ROOT` (default `/tmp/coordinator`).
 
 ## Tests
@@ -16,5 +21,5 @@ Bash-only multi-agent orchestration protocol. See [SPEC.md](SPEC.md).
 test/run.sh
 ```
 
-Each `test/*.test.sh` runs in its own temp dir and asserts on stdout, exit
+`run.sh` vets and builds `bin/coord`, then each `test/*.test.sh` runs in its own temp dir and asserts on stdout, exit
 status, and resulting files. No network, no real agents. Run before committing.
