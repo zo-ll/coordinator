@@ -365,6 +365,7 @@ cmd_decide() {
   commit decide_event || return
   [ -z "$STOP" ] || kill_group "$STOP" TERM
   echo "${typ^^} ${unit:--}"
+  [ "$typ" != dropped ] || progress
 }
 
 # ---------------------------------------------------------------- merge
@@ -426,6 +427,7 @@ cmd_merge() {
   sha=$(git -C "$REPO" rev-parse HEAD)
   one_event type=merged unit="$id" sha="$sha" || return
   echo "MERGED $id sha=$sha"
+  progress
   return 0
 }
 
@@ -513,12 +515,60 @@ claim() {
   BATCH="$RUN/batch/$(date +%s%N).txt"
   {
     while IFS= read -r l; do printf 'EVENT %s\n' "$l"; done <<< "$wakes"
+    next_steps "$wakes"
     if [ -s "$RUN/standing.md" ]; then printf '\nSTANDING ORDERS (apply to everything you do):\n'; cat "$RUN/standing.md"; fi
   } > "$BATCH"
   # the batch is written before the claim: a crash in between leaves the
   # events undelivered, so they are delivered again, never lost
   SEQS=$(awk '{ print $1 }' <<< "$wakes" | paste -sd, -)
   ev type=claimed batch="$BATCH" seqs="$SEQS"
+}
+
+# progress: READY <ids> when units are ready to dispatch, DONE when every
+# unit is merged or dropped. Merge and drop print it too: the readiness or
+# completion they cause wakes no one.
+progress() {
+  local units ready open
+  units=$(model units)
+  ready=$(awk -F"$US" '$19 == 1 { print $1 }' <<< "$units" | paste -sd' ' -)
+  [ -z "$ready" ] || echo "READY $ready: write each a brief, then: coord dispatch <id> --role worker --brief <file>"
+  open=$(awk -F"$US" '$2 != "merged" && $2 != "dropped"' <<< "$units" | grep -c . || true)
+  [ -z "$units" ] || [ "$open" != 0 ] || echo "DONE: every unit is merged or dropped; report what shipped and stop"
+}
+
+# next_steps <wake lines>: after a batch's events, what to do now. Units get
+# one NEXT line from their current state, not from the event, so a
+# redelivered event never repeats a step that was already taken; unit-less
+# events (research, msg) get one per seq. Then READY and DONE.
+next_steps() {
+  local units auto=0 seq unit type rest
+  units=$(model units)
+  [ "$(cfg_val "$CONFIG" autonomy 2>/dev/null || true)" = auto-merge ] && auto=1
+  printf '\n'
+  while read -r seq unit type rest; do
+    if [ "$unit" = - ]; then
+      case "$type" in
+        finished) echo "NEXT $seq: read the report; continue the shape it serves, or take the decision to the user" ;;
+        msg)      echo "NEXT $seq: act on the message" ;;
+      esac
+    fi
+  done <<< "$1"
+  awk '$2 != "-" { print $2 }' <<< "$1" | awk '!seen[$0]++' | while IFS= read -r unit; do
+    awk -F"$US" -v id="$unit" -v auto="$auto" '$1 == id {
+      s = $2
+      if (s == "built") a = "coord dispatch " id " --role critic"
+      else if (s == "passed" && auto) a = "coord merge " id
+      else if (s == "passed") a = "ASK THE USER to approve " id "; on yes: coord approve " id " && coord merge " id
+      else if (s == "approved") a = "coord merge " id
+      else if (s == "handback") a = "write a correction brief from the reason above, then: coord dispatch " id " --role worker --brief <file>"
+      else if (s == "stalled" && $5 == "worker") a = "coord dispatch " id " --role worker"
+      else if (s == "stalled") a = "coord dispatch " id " --role critic"
+      else if (s == "blocked") a = "tell the user why; once fixed: coord reopen " id " --reason \"<what changed>\""
+      else a = "nothing (" s ")"
+      print "NEXT " id ": " a
+    }' <<< "$units"
+  done
+  progress
 }
 
 # deliver <attempts> <backoff>: resume on the batch with backoff; ack on

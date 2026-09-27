@@ -12,9 +12,17 @@ case "$src" in */*) ;; *) src=./$src ;; esac
 SKILL=$(cd -P "${src%/*}/.." && pwd)
 SELF="$SKILL/bin/coord"
 
-usage='usage: coord <apply|approve|block|cfg|detect|dispatch|done|drop|finish|log|merge|msg|plan|reject|relay|render|reopen|research|start|status|unit> ...'
+usage='usage: coord <verb> ...   (coord help lists the verbs)'
 verb=${1:-}
 [ $# -gt 0 ] && shift
+
+case "$verb" in
+  help|-h|--help)
+    # shellcheck source=../lib/help.sh
+    . "$SKILL/lib/help.sh"
+    if [ $# -gt 0 ]; then help_verb "$1"; else help_index; fi
+    exit ;;
+esac
 
 # shellcheck source=../lib/core.sh
 . "$SKILL/lib/core.sh"

@@ -32,7 +32,7 @@ wait_for bash -c "! kill -0 $pid 2>/dev/null"
 assert "$("$COORD" reopen a --reason "API landed")" "REOPENED a"
 export FAKE_WORKER=exit
 has "$("$COORD" dispatch a --role worker --brief "$TMP/brief")" "round=3"
-assert "$("$COORD" drop a --reason "superseded")" "DROPPED a"
+assert "$("$COORD" drop a --reason "superseded" | head -n1)" "DROPPED a"
 refuses "dropped not allowed from dropped" "$COORD" drop a --reason again
 
 # the user's decisions wake the coordinator

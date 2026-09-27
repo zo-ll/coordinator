@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# End to end: a scripted coordinator follows the SKILL routing on every batch
-# the relay delivers — worker done -> critic, critic pass -> merge (auto-merge),
-# then dispatch whatever is ready — until coord done. Units a and b (after a).
+# End to end: a scripted coordinator that only follows each batch's NEXT
+# and READY lines (auto-merge) drives the run until coord done. Units a and
+# b (after a).
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 setup_run
@@ -13,14 +13,16 @@ cat > "$TMP/bin/fake-coordinator" <<'C'
 #!/usr/bin/env bash
 batch="${1#WAKE batch=}"
 echo "turn $batch" >> "$TURNS"
-while read -r tag seq unit type slug result rest; do
-  [ "$tag" = EVENT ] || continue
-  case "$type:$slug:$result" in
-    finished:*.worker:done) "$COORD" dispatch "$unit" --role critic ;;
-    finished:*.critic:pass) "$COORD" merge "$unit" ;;
-  esac
-done < "$batch"
-for id in $("$COORD" unit next); do "$COORD" dispatch "$id" --role worker --brief "$BRIEF"; done
+follow() { # the batch, then the output of every command it runs
+  local l cmd argv ids id
+  while IFS= read -r l; do
+    case "$l" in
+      "NEXT "*": coord "*) cmd=${l#*: coord }; read -ra argv <<< "$cmd"; follow <<< "$("$COORD" "${argv[@]}")" ;;
+      "READY "*) ids=${l#READY }; for id in ${ids%%:*}; do "$COORD" dispatch "$id" --role worker --brief "$BRIEF"; done ;;
+    esac
+  done
+}
+follow < "$batch"
 C
 chmod +x "$TMP/bin/fake-coordinator"
 export COORD_RESUME="fake-coordinator|__BATCH__" COORD_SESSION=s
