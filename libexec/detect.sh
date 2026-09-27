@@ -18,9 +18,9 @@ read -r -a KNOWN <<< "${COORD_KNOWN:-codex claude pi opencode crush goose devin 
 
 exec_recipe() {
   case "$1" in
-    codex)  echo 'codex|exec|-C|__CWD__|--dangerously-bypass-approvals-and-sandbox|__PROMPT__' ;;
-    claude) echo 'claude|-p|--dangerously-skip-permissions|__PROMPT__' ;;
-    pi)     echo 'pi|-p|__PROMPT__' ;;
+    codex)  echo 'codex|exec|-C|__CWD__|-m|__MODEL__|--dangerously-bypass-approvals-and-sandbox|__PROMPT__' ;;
+    claude) echo 'claude|-p|--model|__MODEL__|--dangerously-skip-permissions|__PROMPT__' ;;
+    pi)     echo 'pi|-p|--model|__MODEL__|__PROMPT__' ;;
     opencode) echo 'opencode|run|--auto|__PROMPT__' ;;
     *) return 1 ;;
   esac

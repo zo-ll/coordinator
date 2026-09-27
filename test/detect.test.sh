@@ -25,5 +25,6 @@ assert "$(coord_cfg get "$COORD_ENV_CONF" installed)" "codex"
 assert "$(coord_cfg get "$COORD_ENV_CONF" spawnable)" "codex"
 assert "$(coord_cfg get "$COORD_ENV_CONF" harness.codex.bin)" "$TMP/bin/codex"
 [ -n "$(coord_cfg get "$COORD_ENV_CONF" harness.codex.resume)" ] || { echo "  missing resume recipe"; exit 1; }
+has "$(coord_cfg get "$COORD_ENV_CONF" harness.codex.exec)" "|-m|__MODEL__|"
 
 echo "  detect ok"
