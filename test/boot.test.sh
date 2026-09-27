@@ -40,6 +40,24 @@ assert "$(coord_cfg get "$COORD_CONFIG" autonomy)" "auto-merge"
 assert "$(coord_cfg get "$COORD_CONFIG" critic.model)" "gpt-5"
 assert "$(coord_cfg get "$COORD_CONFIG" tracker)" "local"
 
+# a model the harness does not list is refused
+mkdir -p "$CODEX_HOME"; printf '{"models":[{"slug": "gpt-6-luna"}]}\n' > "$CODEX_HOME/models_cache.json"
+rm -f "$COORD_CONFIG"; coord_plan >/dev/null
+if coord_apply --answers 'critic.model=sonnet' >/dev/null 2>"$TMP/err"; then echo "  wrong-harness model accepted"; exit 1; fi
+grep -q 'FAIL critic.model: "sonnet" is not in codex' "$TMP/err" || { cat "$TMP/err"; exit 1; }
+assert "$(coord_apply --answers 'critic.model=gpt-6-luna')" "OK config=$COORD_CONFIG"
+
+# the user's global defaults are not asked again, and stay theirs
+printf 'critic.model=gpt-6-luna\n' > "$COORD_ROLES"
+rm -f "$COORD_CONFIG"
+out="$(coord_plan)"
+hasnt "$out" "critic.model="
+has "$out" "lane.default.model="
+coord_apply --accept >/dev/null
+assert "$(coord_cfg get "$COORD_CONFIG" critic.model)" ""
+rm -f "$COORD_ROLES"
+coord_apply --answers 'autonomy=auto-merge critic.model=gpt-6-luna' >/dev/null
+
 # once configured, plan asks nothing
 assert "$(printf '%s\n' "$(coord_plan)" | sed -n 2p)" "ASK"
 

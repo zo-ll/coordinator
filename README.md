@@ -28,6 +28,9 @@ installed agent harness (codex, claude, pi, opencode, …) is enough.
   computes the round and finish slug, and launches the harness detached.
   Every role reports with `coord finish`, which wakes the coordinator. `--role critic` writes the critic's brief
   from the worker brief's criteria — never the coordinator's framing.
+- **Roles.** `coord role critic --skill code-review --model <m>` sets a
+  role agent's harness, model, and skills, per repo or `--global` for every
+  repo; `coord skills` lists what is installed.
 - **Evidence.** A critic's pass carries a level (`none < typecheck < tests <
   live`), the commands it ran, and flags such as `red-green`; below the
   playbook's floor it becomes a handback.

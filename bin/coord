@@ -35,12 +35,16 @@ esac
 
 # shellcheck source=../lib/cmd.sh
 . "$SKILL/lib/cmd.sh"
+# shellcheck source=../lib/roles.sh
+. "$SKILL/lib/roles.sh"
 
 case "$verb" in
   unit)     cmd_unit "$@" ;;
   brief)    cmd_brief "$@" ;;
   gate)     cmd_gate "$@" ;;
   standing) cmd_standing "$@" ;;
+  role)     cmd_role "$@" ;;
+  skills)   cmd_skills "$@" ;;
   dispatch) cmd_dispatch "$@" ;;
   research) cmd_research "$@" ;;
   finish)   cmd_finish "$@" ;;

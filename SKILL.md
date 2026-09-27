@@ -20,6 +20,9 @@ Run `bin/coord init`. If it prints an ASK block, put each key and its
 proposed value to the user as a real question and wait for the reply, then
 run what its NEXT line says.
 
+Each role agent's harness, model, and skills are the user's choice:
+`bin/coord role` shows them. Change them only when the user asks.
+
 ## Size the job, pick a shape
 
 - **Small job** (one area, one acceptance, under an hour): one unit, no

@@ -376,6 +376,20 @@ reference, so SKILL.md does not repeat flags or output formats.
 - Plumbing, used by `init` and the relay: `detect`, `plan`, `apply`, `start`,
   `relay`, `cfg`, `unit next`, `done`.
 
+### Roles
+
+Each role agent (worker per lane, critic, researcher) has a harness, a model,
+and skills, under the config prefix `lane.<lane>`, `critic`, or
+`researcher`. `coord role <role> [--global] --harness --model --skill
+--drop-skill` sets them; a value in the repo's `config.conf` wins over the
+user's `~/.coordinator/roles.conf` (`--global`), and an empty value counts as
+unset. A model is checked against its harness where the harness can tell
+(`libexec/models.sh`: codex's model cache, `pi --list-models`, claude's
+aliases); a skill must resolve to a `SKILL.md`, the role's own harness
+directory first, then the shared ones. Every prompt a role gets names its
+skills with the path to read, so skills work the same on any harness; a
+configured skill that has since disappeared refuses the launch.
+
 ### Next steps (the engine routes, the coordinator acts)
 
 A batch lists its events, then what to do now:
@@ -510,6 +524,12 @@ Made during implementation (2026-09-27):
     `coord` (next steps in each batch, `init`, `brief`, `gate`, `standing`,
     `help`), so the skill is only what the engine cannot decide. `render` was
     dropped; `status` is the view.
+
+14. **Roles are the user's, layered and checked.** `coord role` configures
+    each role agent's harness, model, and skills, with personal defaults under
+    per-repo settings. Skills attach per role only, and reach the agent as a
+    SKILL.md path in its prompt rather than through any harness's own skill
+    loading.
 
 ## Open Questions
 

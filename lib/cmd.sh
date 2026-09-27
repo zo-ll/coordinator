@@ -242,8 +242,9 @@ finish_contract() {
 # compose <section> <body file> <contract> > prompt: playbook section, body,
 # standing orders, contract; parts separated by blank lines.
 compose() {
-  local section=$1 body=$2 contract=$3
+  local section=$1 body=$2 contract=$3 skills=${4:-}
   [ -n "$section" ] && printf '%s\n\n' "$section"
+  [ -n "$skills" ] && printf '%s\n' "$skills"
   printf '%s\n' "$(cat "$body")"
   if [ -s "$RUN/standing.md" ]; then
     printf '\nSTANDING ORDERS (apply to everything you do):\n%s\n' "$(cat "$RUN/standing.md")"
@@ -296,17 +297,18 @@ cmd_dispatch() {
   fi
 
   # harness: critic.*; a worker's lane is routing.<risk>, else the playbook's
-  local hkey=critic.harness mkey=critic.model lane harness mdl
+  local rp=critic lane harness mdl skills
   if [ "$role" = worker ]; then
     lane=$PB_LANE
     if [ -n "$U_RISK" ]; then
       lane=$(cfg_get "$CONFIG" "routing.$U_RISK") || { rm -f "$body"; refuse "$id" dispatched "no routing.$U_RISK in $CONFIG"; return; }
     fi
-    hkey="lane.$lane.harness" mkey="lane.$lane.model"
+    rp="lane.$lane"
   fi
-  harness=$(cfg_val "$CONFIG" "$hkey")
-  [ -n "$harness" ] || { rm -f "$body"; refuse "$id" dispatched "no $hkey in $CONFIG"; return; }
-  mdl=$(cfg_val "$CONFIG" "$mkey")
+  harness=$(role_get "$rp" harness)
+  [ -n "$harness" ] || { rm -f "$body"; refuse "$id" dispatched "no $rp.harness (coord role)"; return; }
+  mdl=$(role_get "$rp" model)
+  skills=$(skills_block "$rp" "$harness") || { rm -f "$body"; refuse "$id" dispatched "$rp: no skill \"${skills#SKILL_MISSING }\" installed"; return; }
 
   # the worktree: created on the unit's first worker round, reused after
   local wt=$U_WT fresh=0
@@ -318,7 +320,7 @@ cmd_dispatch() {
 
   local section prompt="$RUN/briefs/$slug.md" logf="$RUN/log/$slug.log" pid
   section=$(pb_section "$role")
-  compose "$section" "$body" "$(finish_contract "$role" "$slug")" > "$prompt"
+  compose "$section" "$body" "$(finish_contract "$role" "$slug")" "$skills" > "$prompt"
   rm -f "$body"
   build_argv "$harness" "$role" "$prompt" "$wt" "$mdl" || { refuse "$id" dispatched "no argv for harness \"$harness\""; return; }
 
@@ -348,14 +350,16 @@ cmd_research() {
   [[ " $(brief "$briefp" fields | paste -sd' ' -) " == *" GOAL "* ]] || { refuse "" brief "missing GOAL (a research brief needs: GOAL)"; return; }
   tb=$(brief "$briefp" get TIMEBOX 2>/dev/null | awk '{ print $1; exit }' || true)
   if [ -n "$tb" ]; then timebox=$(dur "$tb") || { refuse "" brief "TIMEBOX \"$tb\" is not a duration (e.g. 45m)"; return; }; fi
-  harness=$(cfg_val "$CONFIG" researcher.harness)
-  [ -n "$harness" ] || { refuse "" dispatched "no researcher.harness in $CONFIG"; return; }
+  harness=$(role_get researcher harness)
+  [ -n "$harness" ] || { refuse "" dispatched "no researcher.harness (coord role)"; return; }
+  local skills
+  skills=$(skills_block researcher "$harness") || { refuse "" dispatched "researcher: no skill \"${skills#SKILL_MISSING }\" installed"; return; }
   n=$(grep -cE $'\ttype=dispatched\t(.*\t)?role=researcher\t' "$LOG" 2>/dev/null || true)
   n=$(( ${n:-0} + 1 ))
   slug="research.$n" report="$RUN/research/$n.md" prompt="$RUN/briefs/$slug.md" logf="$RUN/log/$slug.log"
   mkdir -p "$RUN/research" "$RUN/briefs"
-  compose "" "$briefp" "$(finish_contract researcher "$slug" "$report")" > "$prompt"
-  build_argv "$harness" researcher "$prompt" "$REPO" "$(cfg_val "$CONFIG" researcher.model)" || {
+  compose "" "$briefp" "$(finish_contract researcher "$slug" "$report")" "$skills" > "$prompt"
+  build_argv "$harness" researcher "$prompt" "$REPO" "$(role_get researcher model)" || {
     refuse "" dispatched "no argv for harness \"$harness\""; return; }
   LAUNCHED=""
   research_events() {
@@ -792,7 +796,7 @@ RUN_IGNORE='# run state of the coordinator: only the committed choices are kept
 !playbooks/*.md'
 
 # newest <dir> <name pattern>: most recently modified matching file
-newest() { find "$1" -type f -name "$2" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -n1 | cut -d' ' -f2-; }
+newest() { { find "$1" -type f -name "$2" -printf '%T@ %p\n' 2>/dev/null || true; } | sort -rn | head -n1 | cut -d' ' -f2-; }
 
 #   start [--harness H] [--session ID] [--no-relay]
 #     -> SESSION <id> source=<...> harness=<h> repo=<repo>  [RELAY pid=<pid>]

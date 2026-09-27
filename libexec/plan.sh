@@ -82,6 +82,26 @@ ask+=("autonomy=approve-merge")
 [ "$tmux" = 1 ] && ask+=("adapters=none")
 [ "$gh" = 1 ] && ask+=("tracker=local")
 
+# the user's own defaults (coord role --global) are already decided: leave
+# the repo key empty so they apply, and don't ask about them
+ROLES="${COORD_ROLES:-$COORD_HOME/roles.conf}"
+for k in critic.harness critic.model researcher.harness researcher.model \
+         lane.default.harness lane.default.model lane.strong.harness lane.strong.model; do
+  gv="$("$CFG" get "$ROLES" "$k" 2>/dev/null || true)"
+  [ -n "$gv" ] || continue
+  if [[ $k == *.harness ]]; then
+    [[ ",$(get spawnable)," == *",$gv,"* ]] || continue
+    case "$k" in
+      critic.*) critic=$gv ;; researcher.*) researcher=$gv ;;
+      lane.default.*) lane_default=$gv ;; lane.strong.*) lane_strong=$gv ;;
+    esac
+  fi
+  "$CFG" get "$PROPOSAL" "$k" >/dev/null 2>&1 && "$CFG" set "$PROPOSAL" "$k" ""
+  keep=()
+  for l in "${ask[@]}"; do [[ $l == "$k="* ]] || keep+=("$l"); done
+  ask=("${keep[@]}")
+done
+
 printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=approve-merge tracker=local adapters=none\n' \
   "$critic" "$researcher" "$lane_default" "${lane_strong:-none}"
 printf 'ASK\n'

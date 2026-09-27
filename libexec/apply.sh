@@ -50,6 +50,16 @@ for k in critic.harness researcher.harness lane.default.harness lane.strong.harn
   esac
 done
 
+# Validate each model against its harness where the harness can tell.
+ROLES="${COORD_ROLES:-$COORD_HOME/roles.conf}"
+for p in critic researcher lane.default lane.strong; do
+  m="$("$CFG" get "$tmp" "$p.model" 2>/dev/null || true)"
+  [ -n "$m" ] || continue
+  h="$("$CFG" get "$tmp" "$p.harness" 2>/dev/null || true)"
+  [ -n "$h" ] || h="$("$CFG" get "$ROLES" "$p.harness" 2>/dev/null || true)"
+  why="$("$HERE/models.sh" "$h" "$m" 2>&1 >/dev/null)" || [ $? = 2 ] || { echo "FAIL $p.model: $why" >&2; exit 1; }
+done
+
 mkdir -p "$(dirname "$config")"
 mv -T -- "$tmp" "$config"
 trap - EXIT

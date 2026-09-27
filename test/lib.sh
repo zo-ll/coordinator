@@ -6,6 +6,8 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
 ROOT="$(cd "$TEST_DIR/.." && pwd)"
 export COORD="$ROOT/bin/coord"
 TMP="$(mktemp -d)"
+# never read this machine's harness state: no codex model list, no skills
+export CODEX_HOME="$TMP/codex-home" CLAUDE_CONFIG_DIR="$TMP/claude-home" COORD_ROLES="$TMP/roles.conf"
 cleanup() {
   pkill -f -- "$TMP/" 2>/dev/null || true
   rm -rf "$TMP"

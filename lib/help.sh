@@ -16,6 +16,8 @@ coordinator:
   msg|block|reopen|drop    other decisions
   gate add|decide|list     reversible choices made on a default
   standing [add "<rule>"]  standing orders every launch and batch carries
+  role [<role> ...]        each role agent's harness, model, and skills
+  skills [<role>]          skills a role's harness can use
   status                   the run at a glance
   log [<id>]               full event history
 
@@ -55,6 +57,21 @@ coord gate decide G<n> "<answer>"
 coord gate list                           the open gates
 EOF
     ;;
+    role) cat <<'EOF'
+coord role
+  -> ROLE <role> harness=<h> model=<m> skills=<a,b>   one line per role
+coord role <role> [--global] [--harness <h>] [--model <m>]
+                  [--skill <name>]... [--drop-skill <name>]...
+  -> ROLE <role> ...   the role after the change
+  Roles: worker, worker:<lane> (e.g. worker:strong), critic, researcher.
+  Settings live in the repo's .coordinator/config.conf; --global writes your
+  defaults in ~/.coordinator/roles.conf, which every repo uses unless it sets
+  its own. The model is checked against the harness where it can be; a skill
+  must be installed (coord skills <role>). A role's skills are named in every
+  prompt it gets, with the SKILL.md path to read.
+EOF
+    ;;
+    skills) echo 'coord skills [<role>]   -> SKILL <name> <path>, the role'"'"'s own harness first (default role: worker)' ;;
     standing) cat <<'EOF'
 coord standing add "<rule>"   -> STANDING <n>: <rule>
 coord standing                the standing orders
