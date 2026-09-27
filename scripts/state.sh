@@ -13,6 +13,7 @@
 #   state.sh blocked <id>
 #   state.sh drop <id>
 #   state.sh list                       -> "id <TAB> status <TAB> pid <TAB> verdict <TAB> goal"
+#   state.sh live                       -> "id pid task" per dispatched|reviewing slice with a pid and task
 #   state.sh done                       -> exit 0 iff every slice is merged|dropped
 #   state.sh render                     -> write COORDINATION.md
 #
@@ -155,6 +156,11 @@ case "$cmd" in
     awk -F'\t' -v OFS='\t' '{ print $1, $2, $8, $10, $12 }' "$ledger"
     ;;
 
+  live)
+    [ -f "$ledger" ] || exit 0
+    awk -F'\t' '($2 == "dispatched" || $2 == "reviewing") && $8 != "" && $4 != "" { print $1, $8, $4 }' "$ledger"
+    ;;
+
   done)
     [ -f "$ledger" ] || exit 0
     awk -F'\t' '$2 != "merged" && $2 != "dropped" { bad = 1 } END { exit(bad ? 1 : 0) }' "$ledger"
@@ -173,7 +179,7 @@ case "$cmd" in
     ;;
 
   *)
-    echo "usage: state.sh add|ready|next|get|dispatch|review|verdict|merged|blocked|drop|list|done|render" >&2
+    echo "usage: state.sh add|ready|next|get|dispatch|review|verdict|merged|blocked|drop|list|live|done|render" >&2
     exit 2
     ;;
 esac

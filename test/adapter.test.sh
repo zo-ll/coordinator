@@ -41,7 +41,7 @@ printf 'lane.default.harness=fake\nlane.default.model=\nadapters=foo\n' > "$COOR
 WT="$TMP/wt"; mkdir -p "$WT"
 git -C "$WT" init -q
 git -C "$WT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
-printf 'do it\n' > "$TMP/brief"
+printf 'do it\nGOAL: g\nSCOPE: s\nACCEPTANCE: a\nVERIFY: v\n' > "$TMP/brief"
 
 "$STATE" add s1 "slice" >/dev/null
 "$SPAWN" --role worker --prompt "$TMP/brief" --worktree "$WT" --slice s1 >/dev/null

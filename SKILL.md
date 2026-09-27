@@ -44,12 +44,35 @@ one-line outputs.
   brief, one slug per round; worktree.sh names branches from it.
 - Worktree: `scripts/worktree.sh --slice <id> --slug <slug>`
 - Dispatch a worker:
-  `scripts/spawn.sh --role worker --prompt <brief> --worktree <dir> --slice <id>`
+  `scripts/spawn.sh --role worker --prompt <brief> --worktree <dir> --slice <id> [--risk mechanical|risky]`
+  (`--risk` picks the lane via `routing.<risk>`; omit it for `lane.default`).
 - Review: `scripts/spawn.sh --role critic --prompt <assignment>
   --worktree <dir> --slice <id>` (a critic is a review round of a slice).
 - Close: after a `pass` bound to the exact reviewed state (the critic's
   `git diff HEAD | sha256sum` of the worktree) and the user's approval,
   `scripts/merge.sh --slice <id>`.
+
+## Briefs and standing orders
+
+`spawn.sh` refuses a brief that lacks its role's header lines (`FIELD:` at the
+start of a line). A field you cannot fill is a slice you have not scoped.
+
+```
+GOAL:        one sentence, executable by a stranger with no chat access
+SCOPE:       paths it may write, paths it may not
+CONTEXT:     files to read; upstream results pasted in full (workers see no siblings)
+ACCEPTANCE:  checkable criteria, one per line
+VERIFY:      exact build/test commands
+TIMEBOX:     rough cap; on expiry, report partial work and finish
+```
+
+Required: worker `GOAL SCOPE ACCEPTANCE VERIFY`; critic `ACCEPTANCE`;
+researcher `GOAL`. Size the brief to the slice.
+
+`.coordinator/standing.md` holds the run's standing orders: numbered lines,
+one constraint each. `spawn.sh` appends it verbatim to every brief and the
+relay to every batch. When you catch yourself restating an instruction, append
+it there instead.
 
 ## The loop (the relay drives it; you own no loop)
 
@@ -62,6 +85,9 @@ resumed turn, read the batch file and route each `EVENT`:
   identity, merges, pushes).
 - `VERDICT <task>: handback` → write a correction brief; respawn the SAME
   worker with a new round slug.
+- `DIED <task>: pid … exited without finish.sh` → the launch died. Run
+  `status.sh`, then respawn the same role for the same round. After two deaths
+  of one slice, `state.sh blocked <id>` and tell the user.
 
 Correlate `DONE <slug>` / `VERDICT <slug>` to the slice whose id is the slug's
 task prefix (before the first `.`). Resolve the task to a slice id in this

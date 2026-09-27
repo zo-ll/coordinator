@@ -53,4 +53,9 @@ grep -q '| s1 | merged |' "$COORD_DASHBOARD" || { echo "  render missing s1"; ex
 # one line per slice
 assert "$("$STATE" list | wc -l)" "3"
 
+# live: only dispatched/reviewing slices, as "id pid task"
+"$STATE" add s4 "fourth" >/dev/null
+"$STATE" dispatch s4 999 /wt/4 b4 s4.r2 >/dev/null
+assert "$("$STATE" live)" "s4 999 s4.r2"
+
 echo "  state ok"

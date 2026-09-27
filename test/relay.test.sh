@@ -109,4 +109,36 @@ assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=1 done=26"
 "$RELAY" --once --interval 0.2
 assert "$("$QUEUE" depth)" "QUEUE pending=0 inflight=0 done=27"
 
+# --- liveness: a dispatched pid that exited without finishing -> DIED event
+export COORD_LEDGER="$TMP/ledger.tsv"
+export COORD_STANDING="$TMP/standing.md"
+STATE="$HERE/../scripts/state.sh"
+bash -c 'exit 0' & dead=$!; wait "$dead"
+sleep 30 & live=$!
+bash -c 'exit 0' & fin=$!; wait "$fin"
+"$STATE" add d1 "dies" >/dev/null;  "$STATE" dispatch d1 "$dead" /wt d1 d1 >/dev/null
+"$STATE" add d2 "runs" >/dev/null;  "$STATE" dispatch d2 "$live" /wt d2 d2 >/dev/null
+"$STATE" add d3 "finished" >/dev/null; "$STATE" dispatch d3 "$fin" /wt d3 d3 >/dev/null
+"$QUEUE" enqueue d3 'DONE d3: done' >/dev/null
+printf '1. keep it small\n' > "$COORD_STANDING"
+: > "$RELAY_LOG"
+
+"$RELAY" --once --interval 0.2
+"$STATE" drop d2 >/dev/null; kill "$live" 2>/dev/null || true
+batch="$(sed 's/.*WAKE batch=//' "$RELAY_LOG")"
+grep -q "^EVENT d1.died.$dead DIED d1: pid $dead exited without finish.sh" "$batch" || {
+  echo "  no DIED for d1:"; cat "$batch"; exit 1; }
+grep -q 'd2' "$batch" && { echo "  live d2 reported:"; cat "$batch"; exit 1; }
+grep -q 'DIED d3' "$batch" && { echo "  finished d3 reported dead"; exit 1; }
+# standing orders ride on every batch
+grep -q '^1. keep it small$' "$batch" || { echo "  standing orders missing:"; cat "$batch"; exit 1; }
+
+# a DIED is reported once per launch, not once per relay loop
+"$QUEUE" enqueue n1 'DONE n1: done' >/dev/null
+: > "$RELAY_LOG"
+"$RELAY" --once --interval 0.2
+batch="$(sed 's/.*WAKE batch=//' "$RELAY_LOG")"
+grep -q 'DIED d1' "$batch" && { echo "  DIED re-reported"; exit 1; }
+[ "$(grep -c '^EVENT ' "$batch")" = 1 ] || { echo "  unexpected events:"; cat "$batch"; exit 1; }
+
 echo "  relay ok"

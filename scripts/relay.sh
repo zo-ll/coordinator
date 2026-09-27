@@ -23,6 +23,13 @@
 # fresh relay.pid is written (self-cleaned on exit) so a stale pid cannot point
 # at a dead process.
 #
+# Liveness: each loop, every dispatched/reviewing slice whose pid is gone and
+# whose owed finish slug was never enqueued becomes a `DIED <task>` event
+# (slug <task>.died.<pid>, so a respawn that dies again reports again).
+#
+# Standing orders ($COORD_STANDING, default <config dir>/standing.md) are
+# appended verbatim to every batch, so every resumed turn carries them.
+#
 # The resume command is config data (never eval'd):
 #   $COORD_CONFIG (default <cwd>/.coordinator/config.conf) keys:
 #     relay.resume   '|'-separated argv template with __SESSION__ and __BATCH__
@@ -86,6 +93,21 @@ resume() { # pointer
   "${argv[@]}"
 }
 
+config_file="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
+STANDING="${COORD_STANDING:-$(dirname "$config_file")/standing.md}"
+export COORD_LEDGER="${COORD_LEDGER:-$(dirname "$config_file")/ledger.tsv}"
+
+reap() { # enqueue DIED for launches that exited without finishing
+  local id pid task
+  while read -r id pid task; do
+    [ -n "$task" ] || continue
+    kill -0 "$pid" 2>/dev/null && continue
+    [ -e "$COORD_ROOT/queue/.seen/$task" ] && continue
+    "$QUEUE" enqueue "$task.died.$pid" \
+      "DIED $task: pid $pid exited without finish.sh (log: $COORD_ROOT/log)" >/dev/null
+  done < <("$HERE/state.sh" live)
+}
+
 mkdir -p "$COORD_ROOT" "$COORD_ROOT/batch"
 
 # single relay: hold the lock for the process lifetime
@@ -122,9 +144,13 @@ deliver() { # batch: retry resume with backoff, ack on success, give up loudly
 }
 
 while :; do
+  reap
   if "$QUEUE" pending; then
     batch="$COORD_ROOT/batch/$(date +%s%N).$$.txt"
     if "$QUEUE" pop-batch "$batch" >/dev/null; then
+      if [ -s "$STANDING" ]; then
+        { printf '\nSTANDING ORDERS (apply to everything you do):\n'; cat "$STANDING"; } >> "$batch"
+      fi
       deliver "$batch" || exit 1
       if [ "$once" = 1 ]; then exit 0; fi
     fi
