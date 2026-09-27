@@ -576,7 +576,13 @@ merge_locked() {
   cur=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
   [ "$cur" = "$base" ] || { refuse "$id" merged "the repo is on \"$cur\", not the base \"$base\""; return; }
   hash=$(state_hash "$U_WT") || { refuse "$id" merged "cannot hash $U_WT"; return; }
-  [ "$hash" = "$U_PASS" ] || { refuse "$id" merged "reviewed state $U_PASS != current $hash (re-review required)"; return; }
+  if [ "$hash" != "$U_PASS" ]; then
+    # the worktree changed after review: that change was never reviewed, so
+    # the unit goes back for a round instead of waiting on a merge that can't happen
+    one_event type=rejected unit="$id" by=engine \
+      text="the worktree changed after review; it needs a new round and review" || return
+    refuse "$id" merged "the worktree changed after review (reviewed ${U_PASS:0:12}, now ${hash:0:12}); unit returned to handback"; return
+  fi
 
   # commit the reviewed state first: VERIFY runs on it, and the commit, not
   # whatever VERIFY leaves behind, is what merges

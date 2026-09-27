@@ -37,8 +37,9 @@ has "$(cat "$REPO/.coordinator/log/m1.verify.log")" '$ test "$(wc -l < file.txt)
 to_passed m2
 "$COORD" approve m2 >/dev/null
 echo sneaky > "$(wt m2)/extra.txt"      # untracked counts too
-refuses "reviewed state" "$COORD" merge m2
-assert "$(state_of m2)" "approved"
+refuses "the worktree changed after review" "$COORD" merge m2
+assert "$(state_of m2)" "handback"          # sent back for a new round, not stuck
+has "$("$COORD" log m2)" "rejected m2 the worktree changed after review"
 rm "$(wt m2)/extra.txt"
 
 # --- VERIFY fails on the reviewed state -> handback ---
