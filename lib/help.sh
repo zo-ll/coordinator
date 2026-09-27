@@ -6,27 +6,61 @@ coord: the coordinator engine. One line out per result; a refusal is
 "REFUSED <unit> <event>: <reason>". `coord help <verb>` for details.
 
 coordinator:
+  init                     set up the run (asks the user once), start the relay
   unit add <id> ...        add a unit of work
-  unit next                ids ready to dispatch
+  brief <id>               draft the unit's next worker brief to fill in
   dispatch <id> ...        launch a worker or critic for a unit
   research --brief <file>  launch a read-only researcher (no unit)
   approve|reject <id>      record the user's decision on a passed unit
   merge <id>               merge an approved unit (re-runs VERIFY)
   msg|block|reopen|drop    other decisions
+  gate add|decide|list     reversible choices made on a default
+  standing [add "<rule>"]  standing orders every launch and batch carries
   status                   the run at a glance
   log [<id>]               full event history
-  done                     DONE when every unit is merged or dropped
 
 role agents (worker, critic, researcher):
   finish ...               report the result; this wakes the coordinator
 
-boot and plumbing:
-  detect, plan, apply, start, relay, cfg, render
+plumbing (init and the relay use these):
+  detect, plan, apply, start, relay, cfg, unit next, done
 EOF
 }
 
 help_verb() {
   case "$1" in
+    init) cat <<'EOF'
+coord init [--accept | --answers "key=value ..."] [--harness <h>] [--session <id>]
+  Detects the harnesses; in an unconfigured repo prints PROPOSE and an ASK
+  block and stops: ask the user, then re-run with --accept or --answers.
+  Then starts the run: SESSION ... and RELAY pid=... If no session id can be
+  found, pass --session <the harness's real session id>; never invent one.
+EOF
+    ;;
+    brief) cat <<'EOF'
+coord brief <id>
+  -> BRIEF <id> <path> needs=<fields>
+  Writes the unit's next worker brief as a draft: the playbook's fields for a
+  first round, the last brief plus CORRECTION for a later one. Replace every
+  <fill: ...>; `coord dispatch <id> --role worker` then uses it. VERIFY lines
+  start with "$ " and are re-run by the critic and by merge. Calling it again
+  returns the same draft.
+EOF
+    ;;
+    gate) cat <<'EOF'
+coord gate add "<question>" --default "<choice>" [--options "<a · b>"]
+  -> GATE G<n> open default=<choice>      go ahead on the default now
+coord gate decide G<n> "<answer>"
+  -> GATE G<n> decided: <answer>           (and NEXT when it differs)
+coord gate list                           the open gates
+EOF
+    ;;
+    standing) cat <<'EOF'
+coord standing add "<rule>"   -> STANDING <n>: <rule>
+coord standing                the standing orders
+  One constraint per rule; every launch and every batch carries them.
+EOF
+    ;;
     unit) cat <<'EOF'
 coord unit add <id> --kind <kind> --goal "<goal>" [--deps a,b] [--risk <risk>]
   -> ADDED <id> kind=<kind>
@@ -39,12 +73,12 @@ coord unit next
 EOF
     ;;
     dispatch) cat <<'EOF'
-coord dispatch <id> --role worker [--brief <file>]
+coord dispatch <id> --role worker [--brief <file>]   (default: the coord brief draft)
 coord dispatch <id> --role critic
   -> DISPATCHED <id> role=<r> round=<n> slug=<s> pid=<p> wt=<path> log=<path>
   The engine computes the round and slug, creates the worktree, and appends
-  the finish contract. A worker redispatch without --brief reuses the last
-  brief. The critic's brief is composed from the worker brief; never write it.
+  the finish contract. A stalled worker redispatched without --brief
+  reuses its last brief. The critic's brief is composed from the worker brief; never write it.
 EOF
     ;;
     research) cat <<'EOF'
@@ -103,7 +137,6 @@ EOF
     ;;
     relay) echo 'coord relay [--once] [--interval N] [--max-attempts N] [--backoff N]   (started by start)' ;;
     cfg) echo 'coord cfg get|set|unset|keys <file> ...   flat key=value config' ;;
-    render) echo 'coord render   -> RENDERED <path>   writes COORDINATION.md' ;;
     *) echo "coord: no help for \"$1\"" >&2; return 2 ;;
   esac
 }

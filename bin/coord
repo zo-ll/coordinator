@@ -38,6 +38,9 @@ esac
 
 case "$verb" in
   unit)     cmd_unit "$@" ;;
+  brief)    cmd_brief "$@" ;;
+  gate)     cmd_gate "$@" ;;
+  standing) cmd_standing "$@" ;;
   dispatch) cmd_dispatch "$@" ;;
   research) cmd_research "$@" ;;
   finish)   cmd_finish "$@" ;;
@@ -50,10 +53,10 @@ case "$verb" in
   merge)    cmd_merge "$@" ;;
   relay)    cmd_relay "$@" ;;
   status)   cmd_status "$@" ;;
-  render)   cmd_render "$@" ;;
   log)      cmd_log "$@" ;;
   done)     cmd_done "$@" ;;
   start)    cmd_start "$@" ;;
+  init)     cmd_init "$@" ;;
   "")       echo "$usage" >&2; exit 2 ;;
   *)        echo "coord: unknown command \"$verb\"" >&2; echo "$usage" >&2; exit 2 ;;
 esac

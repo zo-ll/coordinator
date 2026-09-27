@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The views: status (units, live launches, delivery), render, log, done.
+# The views: status (units, live launches, delivery, gates), log, done.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 setup_run
@@ -22,8 +22,6 @@ assert "$(printf '%s\n' "$out" | grep '^LOG ')" "LOG a a.r1.worker working on it
 if out="$("$COORD" done)"; then echo "  done with open units"; exit 1; fi
 assert "$out" "OPEN a b"
 "$COORD" block a --reason stop >/dev/null
-has "$("$COORD" render)" "RENDERED $REPO/COORDINATION.md"
-grep -q '| a | feature | blocked | 1 |' "$REPO/COORDINATION.md" || { echo "  render:"; cat "$REPO/COORDINATION.md"; exit 1; }
 assert "$("$COORD" log a | awk '{print $2}' | paste -sd, -)" "unit_added,dispatched,blocked"
 "$COORD" drop a --reason x >/dev/null; "$COORD" drop b --reason x >/dev/null
 assert "$("$COORD" done)" "DONE units=2"

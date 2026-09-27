@@ -19,7 +19,7 @@ FAKE_WORKER=partial "$COORD" dispatch p --role worker --brief "$TMP/brief" >/dev
 wave 2
 b="$(last_batch)"
 assert "$(line "$b" "NEXT a:")" "NEXT a: coord dispatch a --role critic"
-has "$(line "$b" "NEXT p:")" "NEXT p: write a correction brief from the reason above, then: coord dispatch p --role worker --brief <file>"
+assert "$(line "$b" "NEXT p:")" "NEXT p: write a correction: coord brief p, fill in its CORRECTION from the reason above, then: coord dispatch p --role worker"
 assert "$(line "$b" READY)" ""
 
 # critic pass -> ask the user (never a bare approve); approved -> merge
@@ -30,14 +30,14 @@ assert "$(line "$(last_batch)" "NEXT a:")" "NEXT a: ASK THE USER to approve a; o
 wave 1
 assert "$(line "$(last_batch)" "NEXT a:")" "NEXT a: coord merge a"
 out="$("$COORD" merge a)"
-has "$out" "READY z: write each a brief"   # merge prints what it made ready
+has "$out" "READY z: for each, coord brief"   # merge prints what it made ready
 
 # a redelivered event gets the hint for now, not for then; merge made z ready
 "$COORD" msg a "late note" >/dev/null
 wave 1
 b="$(last_batch)"
 assert "$(line "$b" "NEXT a:")" "NEXT a: nothing (merged)"
-assert "$(line "$b" READY)" "READY z: write each a brief, then: coord dispatch <id> --role worker --brief <file>"
+assert "$(line "$b" READY)" "READY z: for each, coord brief <id>, fill in the file it prints, then: coord dispatch <id> --role worker"
 
 # under auto-merge a pass merges directly
 printf 'autonomy=auto-merge\n' >> "$REPO/.coordinator/config.conf"

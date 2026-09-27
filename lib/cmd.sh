@@ -53,6 +53,102 @@ cmd_unit() {
   esac
 }
 
+# ---------------------------------------------------------------- briefs
+
+draft_path() { printf '%s' "$RUN/briefs/$1.draft.md"; }
+
+#   brief <id>  -> BRIEF <id> <path> needs=<fields>
+# Writes the unit's next worker brief as a draft to fill in: the playbook's
+# fields for a first round, the last brief plus CORRECTION for a later one.
+# dispatch picks the draft up and refuses it while <fill: ...> remains.
+cmd_brief() {
+  local id=${1:-} p f
+  [ -n "$id" ] || { fail 2 'brief: <id> is required'; return; }
+  unit_row "$id" || { refuse "$id" brief "unknown unit"; return; }
+  playbook "$U_KIND" || { refuse "$id" brief "$PB_ERR"; return; }
+  p=$(draft_path "$id")
+  mkdir -p "$RUN/briefs"
+  if [ -f "$p" ]; then :
+  elif [ -r "$U_BRIEF" ]; then
+    { echo "CORRECTION: <fill: what failed, from the reason in the batch, and what to do now>"; cat "$U_BRIEF"; } > "$p"
+  else
+    {
+      for f in GOAL SCOPE CONTEXT REPRO ACCEPTANCE VERIFY; do
+        [ "$f" = CONTEXT ] || [[ " $PB_REQUIRE " == *" $f "* ]] || continue
+        case "$f" in
+          GOAL)       echo "GOAL: <fill: one sentence a stranger with no chat access can execute>" ;;
+          SCOPE)      echo "SCOPE: <fill: paths it may write; paths it may not>" ;;
+          CONTEXT)    echo "CONTEXT: <fill: files to read; upstream results pasted in full, or none>" ;;
+          REPRO)      echo "REPRO: <fill: the steps that show the defect>" ;;
+          ACCEPTANCE) echo "ACCEPTANCE: <fill: checkable criteria, one per line>" ;;
+          VERIFY)     printf 'VERIFY:\n  $ <fill: a command that proves it; one per line>\n' ;;
+        esac
+      done
+      for f in $PB_REQUIRE; do
+        case " GOAL SCOPE CONTEXT REPRO ACCEPTANCE VERIFY " in *" $f "*) ;; *) echo "$f: <fill>" ;; esac
+      done
+    } > "$p"
+  fi
+  echo "BRIEF $id $p needs=${PB_REQUIRE// /,}"
+}
+
+# ---------------------------------------------------------------- gates, standing orders
+
+#   gate add "<question>" --default "<choice>" [--options "<a · b>"]  -> GATE G<n> open default=<choice>
+#   gate decide G<n> "<answer>"                                       -> GATE G<n> decided: <answer>
+#   gate list                                                         -> GATE G<n> open "<q>" default=<d> ...
+# A gate is a reversible choice the run goes ahead on with its default while
+# the user decides; gates.tsv is id, status, question, options, default, answer.
+cmd_gate() {
+  local sub=${1:-} f=$RUN/gates.tsv n q id ans def st
+  [ $# -gt 0 ] && shift
+  case "$sub" in
+    add)
+      q=${1:-}; [[ -n $q && $q != --* ]] || { fail 2 'gate add: "<question>" is required'; return; }
+      shift
+      parse_args "gate add" "default options" "" "" "$@"
+      [ -n "${F[default]:-}" ] || { fail 2 'gate add: --default is required: a gate goes ahead on it'; return; }
+      mkdir -p "$RUN"
+      n=$(( $(awk 'END { print NR }' "$f" 2>/dev/null || echo 0) + 1 ))
+      printf 'G%s\topen\t%s\t%s\t%s\t\n' "$n" "${q//$'\t'/ }" "${F[options]:-}" "${F[default]}" >> "$f"
+      echo "GATE G$n open default=${F[default]}"
+      ;;
+    decide)
+      id=${1:-} ans=${2:-}
+      [ -n "$id" ] && [ -n "$ans" ] || { fail 2 'gate decide: G<n> "<answer>" is required'; return; }
+      st=$(awk -F'\t' -v id="$id" '$1 == id { print $2 }' "$f" 2>/dev/null || true)
+      def=$(awk -F'\t' -v id="$id" '$1 == id { print $5 }' "$f" 2>/dev/null || true)
+      [ -n "${st:-}" ] || { refuse "" gate "no gate $id"; return; }
+      awk -F'\t' -v OFS='\t' -v id="$id" -v a="${ans//$'\t'/ }" '$1 == id { $2 = "decided"; $6 = a } { print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+      echo "GATE $id decided: $ans"
+      [ "$ans" = "$def" ] || echo "NEXT: the answer differs from the default ($def): fix course with a correction brief or a new unit"
+      ;;
+    list|"")
+      [ -f "$f" ] || return 0
+      awk -F'\t' '$2 == "open" { printf "GATE %s open \"%s\" default=%s%s\n", $1, $3, $5, ($4 == "" ? "" : " options=" $4) }' "$f"
+      ;;
+    *) fail 2 'usage: coord gate add|decide|list ...' ;;
+  esac
+}
+
+#   standing add "<rule>"  -> STANDING <n>: <rule>
+#   standing               -> the standing orders
+# Every launch and every batch carries them.
+cmd_standing() {
+  local f=$RUN/standing.md n
+  case "${1:-}" in
+    add)
+      [ -n "${2:-}" ] || { fail 2 'standing add: "<rule>" is required'; return; }
+      mkdir -p "$RUN"
+      n=$(( $(grep -c . "$f" 2>/dev/null || true) + 1 ))
+      printf '%s. %s\n' "$n" "${2//$'\n'/ }" >> "$f"
+      echo "STANDING $n: ${2//$'\n'/ }"
+      ;;
+    "") [ ! -f "$f" ] || cat "$f" ;;
+    *) fail 2 'usage: coord standing [add "<rule>"]' ;;
+  esac
+}
+
 # ---------------------------------------------------------------- dispatch
 
 # next_round <role>: from U_*, the round this dispatch must carry (NR), or
@@ -173,8 +269,10 @@ cmd_dispatch() {
   body=$(mktemp "$RUN/.body.XXXXXX")
   if [ "$role" = worker ]; then
     [ -n "$briefp" ] || { [ "$U_STATE" = stalled ] && briefp=$U_BRIEF; }
-    [ -n "$briefp" ] || { rm -f "$body"; fail 2 'dispatch: a worker needs --brief <file>'; return; }
+    [ -n "$briefp" ] || { [ -f "$(draft_path "$id")" ] && briefp=$(draft_path "$id"); }
+    [ -n "$briefp" ] || { rm -f "$body"; fail 2 'dispatch: a worker needs a brief (coord brief %s, or --brief <file>)' "$id"; return; }
     [ -r "$briefp" ] || { rm -f "$body"; refuse "$id" brief "not readable: $briefp"; return; }
+    if grep -q '<fill:' "$briefp"; then rm -f "$body"; refuse "$id" brief "still has <fill: ...> placeholders: $briefp"; return; fi
     fields=" $(brief "$briefp" fields | paste -sd' ' -) "
     missing=""
     for f in $PB_REQUIRE; do [[ $fields == *" $f "* ]] || missing+="${missing:+ }$f"; done
@@ -238,6 +336,7 @@ cmd_dispatch() {
     kill_group "$LAUNCHED" TERM   # refused: never leave an unrecorded launch running
     return 1
   fi
+  [ "$role" != worker ] || rm -f "$(draft_path "$id")"   # a used draft is spent
   echo "DISPATCHED $id role=$role round=$round slug=$slug pid=$LAUNCHED wt=$wt log=$logf"
 }
 
@@ -531,7 +630,7 @@ progress() {
   local units ready open
   units=$(model units)
   ready=$(awk -F"$US" '$19 == 1 { print $1 }' <<< "$units" | paste -sd' ' -)
-  [ -z "$ready" ] || echo "READY $ready: write each a brief, then: coord dispatch <id> --role worker --brief <file>"
+  [ -z "$ready" ] || echo "READY $ready: for each, coord brief <id>, fill in the file it prints, then: coord dispatch <id> --role worker"
   open=$(awk -F"$US" '$2 != "merged" && $2 != "dropped"' <<< "$units" | grep -c . || true)
   [ -z "$units" ] || [ "$open" != 0 ] || echo "DONE: every unit is merged or dropped; report what shipped and stop"
 }
@@ -541,7 +640,7 @@ progress() {
 # redelivered event never repeats a step that was already taken; unit-less
 # events (research, msg) get one per seq. Then READY and DONE.
 next_steps() {
-  local units auto=0 seq unit type rest
+  local units auto=0 seq unit type rest g
   units=$(model units)
   [ "$(cfg_val "$CONFIG" autonomy 2>/dev/null || true)" = auto-merge ] && auto=1
   printf '\n'
@@ -560,7 +659,7 @@ next_steps() {
       else if (s == "passed" && auto) a = "coord merge " id
       else if (s == "passed") a = "ASK THE USER to approve " id "; on yes: coord approve " id " && coord merge " id
       else if (s == "approved") a = "coord merge " id
-      else if (s == "handback") a = "write a correction brief from the reason above, then: coord dispatch " id " --role worker --brief <file>"
+      else if (s == "handback") a = "write a correction: coord brief " id ", fill in its CORRECTION from the reason above, then: coord dispatch " id " --role worker"
       else if (s == "stalled" && $5 == "worker") a = "coord dispatch " id " --role worker"
       else if (s == "stalled") a = "coord dispatch " id " --role critic"
       else if (s == "blocked") a = "tell the user why; once fixed: coord reopen " id " --reason \"<what changed>\""
@@ -569,6 +668,8 @@ next_steps() {
     }' <<< "$units"
   done
   progress
+  g=$(awk -F"\t" '$2 == "open" { print $1 }' "$RUN/gates.tsv" 2>/dev/null | paste -sd" " - || true)
+  [ -z "$g" ] || echo "GATES $g open: list them together in your next report to the user (coord gate list)"
 }
 
 # deliver <attempts> <backoff>: resume on the batch with backoff; ack on
@@ -642,19 +743,7 @@ cmd_status() {
     a=0; alive "$pid" && a=1
     echo "RESEARCH $slug pid=$pid alive=$a report=$rep"
   done < <(model research)
-}
-
-# render: COORDINATION.md at the repo root -> RENDERED <path>
-cmd_render() {
-  local dash=${COORD_DASHBOARD:-$REPO/COORDINATION.md}
-  mkdir -p "$(dirname "$dash")"
-  {
-    printf '# COORDINATION\n\n'
-    printf '| id | kind | state | round | evidence | reviewed state | merge | goal |\n'
-    printf '|---|---|---|---|---|---|---|---|\n'
-    model units | awk -F"$US" '{ printf "| %s | %s | %s | %s | %s | %s | %s | %s |\n", $1, $3, $2, $4, $17, substr($16, 1, 12), $18, $22 }'
-  } > "$dash"
-  echo "RENDERED $dash"
+  cmd_gate list
 }
 
 # log [<id>]: "<seq> <type> <unit|-> <what>" per event
@@ -667,6 +756,29 @@ cmd_done() {
   if [ -n "$open" ]; then echo "OPEN $open"; return 1; fi
   n=$(model units | grep -c . || true)
   echo "DONE units=$n"
+}
+
+# ---------------------------------------------------------------- init
+
+#   init [--accept | --answers "k=v ..."] [--harness H] [--session ID]
+# detect, then plan/apply unless the repo is configured, then start. Without
+# config and without an answer it stops after the ASK block: the user decides.
+cmd_init() {
+  parse_args init "answers harness session" "" "accept" "$@"
+  local x=$SKILL/libexec a=()
+  COORD_CONFIG=$CONFIG "$x/detect.sh" || return
+  if [ ! -f "$CONFIG" ]; then
+    COORD_CONFIG=$CONFIG "$x/plan.sh" || return
+    if [ -n "${F[answers]:-}" ]; then COORD_CONFIG=$CONFIG "$x/apply.sh" --answers "${F[answers]}" || return
+    elif [ "${F[accept]:-0}" = 1 ]; then COORD_CONFIG=$CONFIG "$x/apply.sh" --accept || return
+    else
+      echo 'NEXT: ASK THE USER to accept or change these (an empty model means the harness default), then: coord init --accept | coord init --answers "key=value ..."'
+      return 0
+    fi
+  fi
+  [ -z "${F[harness]:-}" ] || a+=(--harness "${F[harness]}")
+  [ -z "${F[session]:-}" ] || a+=(--session "${F[session]}")
+  cmd_start "${a[@]}"
 }
 
 # ---------------------------------------------------------------- start
