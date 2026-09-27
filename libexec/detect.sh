@@ -20,7 +20,7 @@ exec_recipe() {
   case "$1" in
     codex)  echo 'codex|exec|-C|__CWD__|--dangerously-bypass-approvals-and-sandbox|__PROMPT__' ;;
     claude) echo 'claude|-p|--dangerously-skip-permissions|__PROMPT__' ;;
-    pi)     echo 'pi|__PROMPT__' ;;
+    pi)     echo 'pi|-p|__PROMPT__' ;;
     opencode) echo 'opencode|run|--auto|__PROMPT__' ;;
     *) return 1 ;;
   esac
@@ -30,7 +30,7 @@ resume_recipe() {
   case "$1" in
     codex)  echo 'codex|queue|--thread|__SESSION__|--message|__BATCH__' ;;
     claude) echo 'claude|-p|--resume|__SESSION__|--dangerously-skip-permissions|__BATCH__' ;;
-    pi)     echo 'pi|--resume|__SESSION__|__BATCH__' ;;
+    pi)     echo 'pi|-p|--session|__SESSION__|__BATCH__' ;;
     opencode) echo 'opencode|run|--session|__SESSION__|--auto|__BATCH__' ;;
     *) return 1 ;;
   esac
