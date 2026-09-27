@@ -5,6 +5,9 @@ help_index() {
 coord: the coordinator engine. One line out per result; a refusal is
 "REFUSED <unit> <event>: <reason>". `coord help <verb>` for details.
 
+you:
+  watch                    follow the run live and act on what waits for you
+
 coordinator:
   init                     set up the run (asks the user once), start the relay
   unit add <id> ...        add a unit of work
@@ -31,6 +34,19 @@ EOF
 
 help_verb() {
   case "$1" in
+    watch) cat <<'EOF'
+coord watch                                 the live view (in its own terminal)
+coord watch --once [--width N] [--height N] one frame on stdout, then exit
+  The only command meant for people. It shows what waits for you (units to
+  approve, blocked units, open decisions, research reports), whether the
+  coordinator is moving, the agents at work, every unit, and recent events;
+  it redraws once a second. Keys act on the ▸ waiting item: a approve (and
+  merge), r reject with a note, o/x reopen/drop, c/d confirm/change a
+  decision, v read a report, tab next item; ↵ opens a unit in $PAGER,
+  m messages the coordinator, w restarts a stopped wake process, ? keys,
+  q quits (the run keeps going). NO_COLOR turns colors off.
+EOF
+    ;;
     init) cat <<'EOF'
 coord init [--accept | --answers "key=value ..."] [--harness <h>] [--session <id>]
   Detects the harnesses; in an unconfigured repo prints PROPOSE and an ASK
@@ -153,7 +169,11 @@ coord start [--harness <h>] [--session <id>] [--no-relay]
   -> SESSION <id> source=<...> harness=<h> repo=<repo>  [RELAY pid=<pid>]
 EOF
     ;;
-    relay) echo 'coord relay [--once] [--interval N] [--max-attempts N] [--backoff N]   (started by start)' ;;
+    relay) cat <<'EOF'
+coord relay [--once] [--interval N] [--max-attempts N] [--backoff N]   (started by init)
+coord relay --detach   restart this run's relay in the background, unless one is alive
+EOF
+    ;;
     cfg) echo 'coord cfg get|set|unset|keys <file> ...   flat key=value config' ;;
     *) echo "coord: no help for \"$1\"" >&2; return 2 ;;
   esac

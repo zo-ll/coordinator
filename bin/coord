@@ -37,6 +37,8 @@ esac
 . "$SKILL/lib/cmd.sh"
 # shellcheck source=../lib/roles.sh
 . "$SKILL/lib/roles.sh"
+# shellcheck source=../lib/watch.sh
+. "$SKILL/lib/watch.sh"
 
 case "$verb" in
   unit)     cmd_unit "$@" ;;
@@ -45,6 +47,7 @@ case "$verb" in
   standing) cmd_standing "$@" ;;
   role)     cmd_role "$@" ;;
   skills)   cmd_skills "$@" ;;
+  watch)    cmd_watch "$@" ;;
   dispatch) cmd_dispatch "$@" ;;
   research) cmd_research "$@" ;;
   finish)   cmd_finish "$@" ;;

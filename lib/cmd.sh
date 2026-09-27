@@ -477,7 +477,10 @@ cmd_decide() {
 run_verify() {
   local rc=0
   printf '$ %s\n' "$2" >> "$3"
-  ( cd "$1" && timeout -k 5 "$4" bash -c "$2" ) >> "$3" 2>&1 || rc=$?
+  (
+    [ -z "${MERGE_LOCK:-}" ] || exec {MERGE_LOCK}>&-   # never hand the lock to VERIFY
+    cd "$1" && timeout -k 5 "$4" bash -c "$2"
+  ) >> "$3" 2>&1 || rc=$?
   if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
     printf '(timed out after %ss)\n' "$4" >> "$3"; return 124
   fi
@@ -491,8 +494,21 @@ verify_failed() { # <id> <command> <exit> <log> <why>
 
 #   merge <id>  -> MERGED <id> sha=<sha> (local merge only)
 cmd_merge() {
-  local id=${1:-} base cur hash secs vlog code cmd sha changed
-  [ -n "$id" ] || { fail 2 'merge: <id> is required'; return; }
+  [ -n "${1:-}" ] || { fail 2 'merge: <id> is required'; return; }
+  # one merge at a time: watch and the coordinator may both try, and two
+  # merges into the base at once would race
+  local r=0
+  mkdir -p "$RUN"
+  exec {MERGE_LOCK}>"$RUN/merge.lock"
+  flock "$MERGE_LOCK"
+  merge_locked "$1" || r=$?
+  exec {MERGE_LOCK}>&-
+  MERGE_LOCK=""
+  return "$r"
+}
+
+merge_locked() {
+  local id=$1 base cur hash secs vlog code cmd sha changed
   unit_row "$id" || { refuse "$id" merged "unknown unit"; return; }
   if ! { [ "$U_STATE" = approved ] || { [ "$U_STATE" = passed ] && [ "$(cfg_val "$CONFIG" autonomy)" = auto-merge ]; }; }; then
     [ "$U_STATE" = passed ] && { refuse "$id" merged "needs the user's approval (coord approve $id)"; return; }
@@ -549,13 +565,20 @@ cmd_merge() {
 
 # The scheduler: the only thing that turns events into coordinator turns.
 #   relay [--once] [--interval N] [--max-attempts N] [--backoff N]
+#   relay --detach   (re)start this run's relay in the background -> RELAY pid=<pid>
 # One relay per run. Each tick: report launches that died (exited) or ran
 # past their timebox (SIGTERM, SIGKILL after timebox.grace, then died
 # timeout; a second death in a round blocks the unit); then write every
 # undelivered wake event into one batch file, claim it, resume the
 # coordinator with "WAKE batch=<path>", and ack when its turn exits.
 cmd_relay() {
-  parse_args relay "interval max-attempts backoff" "" "once" "$@"
+  parse_args relay "interval max-attempts backoff" "" "once detach" "$@"
+  if [ "${F[detach]:-0}" = 1 ]; then   # (re)start this run's relay in the background
+    local rp; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
+    if alive "$rp"; then echo "RELAY pid=$rp (already running)"; return 0; fi
+    [ -s "$RUN/session" ] || { fail 1 'relay: no session for this run (coord init)'; return; }
+    start_relay "$(cat "$RUN/session")"; return
+  fi
   local interval=${F[interval]:-${RELAY_INTERVAL:-1}} attempts=${F[max-attempts]:-${RELAY_MAX_ATTEMPTS:-5}}
   local backoff=${F[backoff]:-${RELAY_BACKOFF:-2}} once=${F[once]:-0} pidfile
   [[ $interval =~ ^[0-9]+(\.[0-9]+)?$ && $attempts =~ ^[0-9]+$ && $backoff =~ ^[0-9]+$ ]] || {
@@ -875,11 +898,17 @@ cmd_start() {
   [ -f "$CONFIG" ] || : > "$CONFIG"
   rec=$(cfg_val "$ENV_CONF" "harness.$harness.resume")
   [ -z "$rec" ] || "$SKILL/libexec/cfg.sh" set "$CONFIG" relay.resume "$rec"
+  start_relay "$sid"
+}
+
+# start_relay <session>: the relay, detached, for this run -> RELAY pid=<pid>
+start_relay() {
+  local pid
   mkdir -p "$RUN/log"
   pid=$(
     (
       cd "$REPO" || exit 1
-      export COORD_EVENTS="$LOG" COORD_CONFIG="$CONFIG" COORD_SESSION="$sid"
+      export COORD_EVENTS="$LOG" COORD_CONFIG="$CONFIG" COORD_SESSION="$1"
       exec setsid "$SELF" relay
     ) >> "$RUN/log/relay.log" 2>&1 < /dev/null &
     echo $!

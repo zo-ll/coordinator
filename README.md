@@ -11,6 +11,16 @@ reference. The engine is bash (`bin/coord`, with
 coreutils, util-linux, awk and git. No `tmux`, `python`, or `node`, and one
 installed agent harness (codex, claude, pi, opencode, …) is enough.
 
+## Following a run
+
+`coord watch` is the one command meant for people. Open it in a second
+terminal next to your agent: it shows what waits for you (units to approve,
+blocked units, open decisions, research reports), whether the coordinator is
+moving, the agents at work with their latest output, every unit, and what just
+happened. Keys act on what waits: `a` approves and merges, `r` sends back with
+a note, `m` messages the coordinator, `↵` opens a unit in your pager, `?`
+lists the rest.
+
 ## How it works
 
 - **A lean skill over a self-describing CLI.** `SKILL.md` holds only the

@@ -23,6 +23,10 @@ run what its NEXT line says.
 Each role agent's harness, model, and skills are the user's choice:
 `bin/coord role` shows them. Change them only when the user asks.
 
+Once the run has started, tell the user once that they can follow it live, and
+approve from there, with `<this skill's directory>/bin/coord watch` in another
+terminal.
+
 ## Size the job, pick a shape
 
 - **Small job** (one area, one acceptance, under an hour): one unit, no

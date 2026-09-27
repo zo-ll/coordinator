@@ -95,4 +95,13 @@ has "$(cat "$(last_batch)")" "t1 died t1.r1.worker pid=$pid timeout"
 kill -0 "$pid" 2>/dev/null && { echo "  timed-out launch still alive"; exit 1; }
 assert "$(state_of t1)" "stalled"
 
+# --- --detach restarts this run's relay once, and only once ---
+echo "sess-1" > "$REPO/.coordinator/session"
+out="$("$COORD" relay --detach)"
+has "$out" "RELAY pid="
+pid="${out##*pid=}"
+kill -0 "$pid"
+has "$("$COORD" relay --detach)" "RELAY pid=$pid (already running)"
+kill "$pid"
+
 echo "  relay ok"

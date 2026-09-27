@@ -352,6 +352,22 @@ reference, so SKILL.md does not repeat flags or output formats.
 - Plumbing, used by `init` and the relay: `detect`, `plan`, `apply`, `start`,
   `relay`, `cfg`, `unit next`, `done`.
 
+### Watch
+
+`coord watch` is the only user-facing command. It reads the event log (through
+`lib/watch.awk`, which turns events into plain sentences), `model units`,
+gates, launch logs, and the relay's pid; it never writes state except by
+running `coord` commands, whose one-line reply it shows. The screen, top to
+bottom: the coordinator's line (idle, working on a turn and what woke it,
+wake queued, or stuck), a red box when the relay is down while work remains,
+the PENDING box (blocked units, passed units, open gates, unread research
+reports; keys act on the selected item), agents, units as sentences, and the
+recent feed, which takes whatever rows are left. It redraws once a second and
+writes only the lines that changed. Approving from watch runs `approve` then
+`merge`, so a passed unit merges even while the coordinator is stuck; `merge`
+holds a run-wide lock, so watch and the coordinator never merge at once.
+`--once` prints one frame for scripts and tests.
+
 ### Roles
 
 Each role agent (worker per lane, critic, researcher) has a harness, a model,
@@ -485,6 +501,12 @@ Made during implementation (2026-09-27):
     `__pycache__`); edits to reviewed files still refuse it. VERIFY stays in
     the worker's worktree, not a fresh checkout, so gitignored dependencies
     remain available to it.
+
+15. **`coord watch` is the one command for people.** Designed in Claude
+    Design (a character-grid terminal UI, 16 colors); v0 is one column that
+    fits 44 to 100 columns, redraws once a second, and opens units in
+    `$PAGER`. Tabs, a highlight cursor, time bars, and the wide two-column
+    layout are later.
 
 ## Open Questions
 
