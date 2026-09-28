@@ -71,6 +71,14 @@ has "$(cat "$TMP/err")" "SKIP (exists, not ours): $HOME/.codex/skills/filo"
 [ -d "$HOME/.codex/skills/filo" ] && [ ! -L "$HOME/.local/bin/filo" ] || { echo "  a foreign filo was touched"; exit 1; }
 rmdir "$HOME/.codex/skills/filo"; rm "$HOME/.local/bin/filo"
 
+# a dir it can't write to is skipped, not fatal (FILO_BIN_DIR=/usr/local/bin without sudo)
+mkdir -p "$TMP/ro"; chmod 555 "$TMP/ro"
+out="$(FILO_BIN_DIR="$TMP/ro" "$INSTALL" 2>"$TMP/err")"
+assert "$out" "DONE skills=2 cli=skipped skipped=1"
+has "$(cat "$TMP/err")" "SKIP (cannot link): $TMP/ro/filo"
+case "$(cat "$TMP/err")" in *"not on your PATH"*) echo "  PATH hint for a dir with no filo"; exit 1 ;; esac
+chmod 755 "$TMP/ro"
+
 # FILO_BIN_DIR picks the command's dir
 out="$(FILO_BIN_DIR="$TMP/mybin" "$INSTALL" 2>/dev/null)"
 has "$out" "cli=$TMP/mybin/filo"; ours "$TMP/mybin/filo" "$REPO/bin/filo"

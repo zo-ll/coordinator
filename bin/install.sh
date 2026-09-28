@@ -66,7 +66,8 @@ link() {
       say "SKIP (exists, not ours): $l"; FOREIGN=$((FOREIGN + 1)); return 0
     fi
   fi
-  ln -s "$t" "$l"; say "linked: $l -> $t"; CHANGED=1
+  ln -s "$t" "$l" 2>/dev/null || { say "SKIP (cannot link): $l"; FOREIGN=$((FOREIGN + 1)); return 0; }
+  say "linked: $l -> $t"; CHANGED=1
 }
 
 # unlink <path> <target>: remove <path> if it is our link to <target>
@@ -102,8 +103,8 @@ if mkdir -p "$BIN_DIR" 2>/dev/null; then
 else
   say "SKIP (cannot create): $BIN_DIR"; FOREIGN=$((FOREIGN + 1))
 fi
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
+case ":$PATH:$cli" in
+  *":$BIN_DIR:"*|*skipped) ;;
   *) say "$BIN_DIR is not on your PATH: add this to your shell's rc file: export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac
 [ "$CHANGED" = 1 ] || say "nothing to change: filo is already set up"
