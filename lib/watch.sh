@@ -448,23 +448,25 @@ diff_tab() {
   if [ "$U_STATE" = merged ] && [ -n "$U_SHA" ]; then
     g+=(-C "$REPO"); set -- "$U_SHA^1" "$U_SHA"
   elif [ -d "$U_WT" ]; then
-    local -x GIT_INDEX_FILE="$RUN/watch.index"
-    rm -f "$GIT_INDEX_FILE"
-    "${g[@]}" -C "$U_WT" read-tree HEAD 2>/dev/null && "${g[@]}" -C "$U_WT" add -A -N 2>/dev/null || true
+    # a copy of the worktree's own index keeps its stat cache: only changed files get hashed
+    local -x GIT_INDEX_FILE="$W_TMP.index"
+    cp "$(git -C "$U_WT" rev-parse --path-format=absolute --git-path index 2>/dev/null)" "$GIT_INDEX_FILE" 2>/dev/null \
+      || { rm -f "$GIT_INDEX_FILE"; "${g[@]}" -C "$U_WT" read-tree HEAD 2>/dev/null || true; }
+    "${g[@]}" -C "$U_WT" add -A -N 2>/dev/null || true
     g+=(-C "$U_WT"); set -- HEAD
   else
     m d 'no changes: no worktree yet'; echo; return 0
   fi
   # the summary in one pass: "path  +a −d", new files marked; fails on no changes
   { "${g[@]}" diff --name-only --diff-filter=A "$@" 2>/dev/null || true; echo $'\001'
-    "${g[@]}" diff --numstat "$@" 2>/dev/null || true; } > "$RUN/watch.stat"
+    "${g[@]}" diff --numstat "$@" 2>/dev/null || true; } > "$W_TMP.stat"
   awk -F'\t' '
     function m(k, t) { return "\001" k "\002" t "\003" }
     $0 == "\001" { stat = 1; next }
     !stat { NEW[$0] = 1; next }
     NF >= 3 { f = $3; gsub(/[\001-\037\177]/, " ", f); n++
               print "  " m("b", f) "  " m("g", "+" $1) " " m("r", "−" $2) (($3 in NEW) ? m("d", " new") : "") }
-    END { if (!n) { print m("d", "no changes yet"); exit 1 } }' "$RUN/watch.stat" || return 0
+    END { if (!n) { print m("d", "no changes yet"); exit 1 } }' "$W_TMP.stat" || return 0
   echo
   { "${g[@]}" diff "$@" 2>/dev/null || true; } | plain \
     | sed $'s/^diff --git .*/\001b\002&\003/; t; s/^+.*/\001g\002&\003/; t; s/^-.*/\001r\002&\003/'
@@ -501,7 +503,7 @@ scroll() { TSCROLL=$((TSCROLL + $1)); [ "$TSCROLL" -ge 0 ] || TSCROLL=0; TFOLLOW
 
 # unit_frame <width> <height>: the open unit: header, tabs, the tab's lines
 unit_frame() {
-  local w=$1 h=$2 id=$VIEW row="" i t sp total rows max body=() f="$RUN/watch.tab" right
+  local w=$1 h=$2 id=$VIEW row="" i t sp total rows max body=() f="$W_TMP.tab" right
   watch_gather || true
   unit_row "$id" || { VIEW=""; watch_frame "$w" "$h"; return; }
   for row in "${UNITS[@]}"; do [ "${row%%"$US"*}" = "$id" ] && break; done
@@ -544,8 +546,8 @@ view_key() {
     k|UP)   scroll -1 ;;
     ' ')    scroll "$(( ${VIEW_ROWS:-20} - 1 ))" ;;
     n|N) [ "$TAB" = 3 ] || return 0
-         if [ "$1" = n ]; then l=$(grep -n $'^\001b\002diff --git' "$RUN/watch.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 > s { print; exit }')
-         else l=$(grep -n $'^\001b\002diff --git' "$RUN/watch.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 < s { l = $1 } END { print l }'); fi
+         if [ "$1" = n ]; then l=$(grep -n $'^\001b\002diff --git' "$W_TMP.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 > s { print; exit }')
+         else l=$(grep -n $'^\001b\002diff --git' "$W_TMP.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 < s { l = $1 } END { print l }'); fi
          [ -z "$l" ] || { TSCROLL=$((l - 1)) TFOLLOW=0; } ;;
     '['|']') [ "$TAB" = 5 ] || return 0
          mapfile -t OUTS < <(out_logs "$VIEW")
@@ -555,7 +557,7 @@ view_key() {
          # past the last round: back to "the newest", which follows a live agent
          [ "$OUT_IX" -lt $(( ${#OUTS[@]} - 1 )) ] || OUT_IX=-1
          TSCROLL=0 TFOLLOW=1 ;;
-    p) sed $'s/\001[a-zA-Z]*\002//g; s/\003//g' "$RUN/watch.tab" > "$RUN/watch.page"; page "$RUN/watch.page" ;;
+    p) sed $'s/\001[a-zA-Z]*\002//g; s/\003//g' "$W_TMP.tab" > "$W_TMP.page"; page "$W_TMP.page" ;;
     ESC) VIEW="" W_REPLY="" ;;
   esac
   return 0
@@ -668,7 +670,7 @@ page() { # page <file>
 }
 
 keys_page() {
-  local f="$RUN/watch.page"
+  local f="$W_TMP.page"
   cat > "$f" <<'EOF'
 coord watch keys
 
@@ -795,6 +797,7 @@ on_key() {
 cmd_watch() {
   parse_args watch "width height press open tab" "" "once" "$@"
   SEL=0 W_LIVE=0 FEED_OFF=0 VIEW="" TAB=1
+  W_TMP="$RUN/watch.$$"   # this watch's scratch files (two watches never share them)
   if [ -n "${F[open]:-}" ]; then   # --open: start in a unit's view, on --tab (a name or 1-6)
     watch_gather || true
     open_unit "${F[open]}" || { fail 2 'watch: no unit "%s"' "${F[open]}"; return; }
@@ -814,10 +817,11 @@ cmd_watch() {
     watch_frame "$w" "$h"
     [ -z "$W_REPLY" ] || FRAME+=("$W_REPLY")
     for l in "${FRAME[@]}" "$(m d "$(rep ─ "$w")")" "$KEYS"; do ansi "$(fit "$l" "$w")" | sed 's/ *$//'; echo; done
+    rm -f "$W_TMP".*
     return 0
   fi
   W_LIVE=1 W_STTY=$(stty -g 2>/dev/null || true)
-  trap 'term_off' EXIT
+  trap 'term_off; rm -f "$W_TMP".*' EXIT
   trap 'W_FULL=1' WINCH
   term_on
   while :; do

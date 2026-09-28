@@ -124,6 +124,7 @@ out="$(view pass1 --tab diff 2>"$TMP/err")"
 has "$out" "café.txt  +2 −0 new"; has "$out" "+++ b/café.txt"; assert "$(cat "$TMP/err")" ""
 assert "$(git -c core.quotePath=false -C .coordinator/worktrees/pass1 status --short café.txt)" "?? café.txt"   # the real index untouched
 rm .coordinator/worktrees/pass1/café.txt
+assert "$(ls .coordinator/watch.* 2>/dev/null || true)" ""                   # its scratch files leave with it
 # narrow: the tab bar keeps all six; a bad --tab is refused
 has "$("$COORD" watch --once --width 44 --height 30 --open pass1)" "6 hist"
 refuses "--tab is one of 1-6" "$COORD" watch --once --open pass1 --tab nope
