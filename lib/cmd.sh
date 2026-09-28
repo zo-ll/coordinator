@@ -190,13 +190,19 @@ make_worktree() {
   # one worktree add at a time: concurrent adds in one repo read each other's
   # half-written .git/worktrees entries and fail. flock -o holds the lock
   # itself and gives git none of it, so nothing git starts (a post-checkout
-  # hook's background job) can keep it; -w turns a stuck add into a refusal.
-  local add=(flock -o -w 120 "$RUN/worktree.lock" git -C "$REPO" worktree add -q)
+  # hook's background job) can keep it. A dispatch stuck behind a stalled add
+  # waits 120s, then is refused (exit 75: nothing was created, retry is safe).
+  local add=(flock -o -w 120 -E 75 "$RUN/worktree.lock" git -C "$REPO" worktree add -q) rc=0
   if git -C "$REPO" rev-parse --verify --quiet "refs/heads/$WT_BRANCH" >/dev/null 2>&1; then
-    "${add[@]}" "$WT_PATH" "$WT_BRANCH" >&2 || { WT_ERR="git worktree add failed for $WT_BRANCH"; return 1; }
+    "${add[@]}" "$WT_PATH" "$WT_BRANCH" >&2 || rc=$?
   else
-    "${add[@]}" -b "$WT_BRANCH" "$WT_PATH" "$WT_BASE" >&2 || { WT_ERR="git worktree add failed for $WT_BRANCH"; return 1; }
+    "${add[@]}" -b "$WT_BRANCH" "$WT_PATH" "$WT_BASE" >&2 || rc=$?
   fi
+  case $rc in
+    0) ;;
+    75) WT_ERR="timed out waiting for $RUN/worktree.lock (another worktree add is stuck)"; return 1 ;;
+    *) WT_ERR="git worktree add failed for $WT_BRANCH"; return 1 ;;
+  esac
 }
 
 # refresh_worktree <id> <wt>: before a worker round, move the unit's worktree
