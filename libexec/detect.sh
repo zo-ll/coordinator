@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Detect the environment and write $COORD_HOME/env.conf.
+# Detect the environment and write $FILO_HOME/env.conf.
 #
 #   detect.sh   -> DETECT current=<h> installed=<a,b> spawnable=<a,b>
 #
 # Current harness: env sentinel first, else walk the ancestor process chain.
-# Installed: command -v over the known list (override with COORD_KNOWN).
+# Installed: command -v over the known list (override with FILO_KNOWN).
 # Spawnable: installed AND we know an exec recipe for it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFG="$HERE/cfg.sh"
-COORD_HOME="${COORD_HOME:-$HOME/.coordinator}"
-ENV_CONF="${COORD_ENV_CONF:-$COORD_HOME/env.conf}"
-mkdir -p "$COORD_HOME"
+FILO_HOME="${FILO_HOME:-$HOME/.filo}"
+ENV_CONF="${FILO_ENV_CONF:-$FILO_HOME/env.conf}"
+mkdir -p "$FILO_HOME"
 
-read -r -a KNOWN <<< "${COORD_KNOWN:-codex claude pi opencode crush goose devin gemini}"
+read -r -a KNOWN <<< "${FILO_KNOWN:-codex claude pi opencode crush goose devin gemini}"
 
 exec_recipe() {
   case "$1" in
@@ -40,8 +40,8 @@ join_by() { local IFS="$1"; shift; printf '%s' "$*"; }
 
 # current harness: the nearest harness among our ancestors, since env vars
 # leak into nested harnesses (codex started from claude still has CLAUDECODE);
-# env sentinels only when the walk finds none. COORD_CURRENT overrides both.
-current="${COORD_CURRENT:-}"
+# env sentinels only when the walk finds none. FILO_CURRENT overrides both.
+current="${FILO_CURRENT:-}"
 source="unknown"; [ -z "$current" ] || source=override
 pid="$PPID"
 for _ in $(seq 1 12); do

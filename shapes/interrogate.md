@@ -13,6 +13,6 @@ unit: the critic is the review.
 2. Sort the findings: **act on** what two reviewers raised (the critic
    counts as one) or one proved with a failing command; **consider** the
    plausible single ones; **dismiss** style and out-of-SCOPE.
-3. Anything to act on: `coord reject <unit> "<the findings>"`, then a
+3. Anything to act on: `filo reject <unit> "<the findings>"`, then a
    correction brief listing each one. Otherwise ask the user to approve,
    listing the *consider* items.

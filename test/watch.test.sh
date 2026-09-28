@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
-# coord watch: the frame for a live run (waiting items, agents, units, feed),
+# filo watch: the frame for a live run (waiting items, agents, units, feed),
 # and the keys that act on the selected item.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 setup_run
 brief "$TMP/brief"
 cd "$REPO"
-frame() { "$COORD" watch --once --width "${1:-60}" --height 70 "${@:2}"; }
+frame() { "$FILO" watch --once --width "${1:-60}" --height 70 "${@:2}"; }
 
 # no run yet
-rm -f "$COORD_EVENTS"
+rm -f "$FILO_EVENTS"
 has "$(frame)" "No run here yet"
 
 # a run with something in every region
-"$COORD" unit add done1 --kind chore --goal "already shipped" >/dev/null
-"$COORD" unit add pass1 --kind feature --goal "passes review" >/dev/null
-"$COORD" unit add dead1 --kind feature --goal "keeps dying" >/dev/null
-"$COORD" unit add busy1 --kind feature --goal "still working" >/dev/null
-"$COORD" unit add next1 --kind chore --goal "after busy1" --deps busy1 >/dev/null
+"$FILO" unit add done1 --kind chore --goal "already shipped" >/dev/null
+"$FILO" unit add pass1 --kind feature --goal "passes review" >/dev/null
+"$FILO" unit add dead1 --kind feature --goal "keeps dying" >/dev/null
+"$FILO" unit add busy1 --kind feature --goal "still working" >/dev/null
+"$FILO" unit add next1 --kind chore --goal "after busy1" --deps busy1 >/dev/null
 pass() { # pass <unit>: worker, then critic
-  "$COORD" dispatch "$1" --role worker --brief "$TMP/brief" >/dev/null; wait_for is_state "$1" built
-  "$COORD" dispatch "$1" --role critic >/dev/null; wait_for is_state "$1" passed
+  "$FILO" dispatch "$1" --role worker --brief "$TMP/brief" >/dev/null; wait_for is_state "$1" built
+  "$FILO" dispatch "$1" --role critic >/dev/null; wait_for is_state "$1" passed
 }
-pass done1; "$COORD" approve done1 >/dev/null; "$COORD" merge done1 >/dev/null
+pass done1; "$FILO" approve done1 >/dev/null; "$FILO" merge done1 >/dev/null
 pass pass1   # branched after done1 merged, so it merges cleanly
-FAKE_WORKER=exit "$COORD" dispatch dead1 --role worker --brief "$TMP/brief" >/dev/null
-"$COORD" block dead1 --reason "agent died twice" >/dev/null
-FAKE_WORKER=sleep "$COORD" dispatch busy1 --role worker --brief "$TMP/brief" >/dev/null
-echo "ran pytest: 3 failed" >> .coordinator/log/busy1.r1.worker.log
-"$COORD" gate add "which retry library?" --default hand-rolled >/dev/null
-printf 'GOAL: pick a queue\n' > "$TMP/rb"; "$COORD" research --brief "$TMP/rb" >/dev/null
-wait_for grep -q 'role=researcher.*result=done\|result=done.*research' "$COORD_EVENTS"
+FAKE_WORKER=exit "$FILO" dispatch dead1 --role worker --brief "$TMP/brief" >/dev/null
+"$FILO" block dead1 --reason "agent died twice" >/dev/null
+FAKE_WORKER=sleep "$FILO" dispatch busy1 --role worker --brief "$TMP/brief" >/dev/null
+echo "ran pytest: 3 failed" >> .filo/log/busy1.r1.worker.log
+"$FILO" gate add "which retry library?" --default hand-rolled >/dev/null
+printf 'GOAL: pick a queue\n' > "$TMP/rb"; "$FILO" research --brief "$TMP/rb" >/dev/null
+wait_for grep -q 'role=researcher.*result=done\|result=done.*research' "$FILO_EVENTS"
 
 out="$(frame 80)"
 has "$out" "coordinator  ✗ stuck: the wake process is down"     # no relay in tests
@@ -40,7 +40,7 @@ has "$out" "needs you    ▲ pass1 · ■ dead1 · ? G1 · ≡ research.1"
 has "$out" "─ WORK "
 has "$out" "▸▲ pass1  passed · needs your approval"                  # approve-merge in tests
 has "$out" 'critic: looks right'
-has "$out" "coord/pass1 · 1 file +1 −0 · file.txt · .coordinator/worktrees/pass1"
+has "$out" "filo/pass1 · 1 file +1 −0 · file.txt · .filo/worktrees/pass1"
 has "$out" " ■ dead1  blocked: agent died twice"
 has "$out" " ◐ busy1  being built · round 1"
 has "$out" "worker r1 · 0/60m · output"
@@ -67,7 +67,7 @@ hasnt "$(frame 80 --press "$(click 3 "$r" 0 | tr M m)")" "▸◐ busy1"         
 hasnt "$(frame 80 --press "$(click 3 "$r" 2)")" "▸◐ busy1"                  # nor another button
 has "$(frame 80 --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")")" "o reopen  x drop"
 has "$(frame 80 --press "$(click 3 "$r")$(click 3 "$r")")" "esc ‹  busy1  feature · round 1"  # again opens
-has "$(PAGER='head -n1' frame 80 --press "$(click "$(col_of "$bar" '? keys')" 70)")" "coord watch keys"
+has "$(PAGER='head -n1' frame 80 --press "$(click "$(col_of "$bar" '? keys')" 70)")" "filo watch keys"
 has "$(frame 80 --press "$(click 3 "$r" 65)$(click 3 "$r" 65)")" "▸◐ busy1"  # wheel moves the selection
 has "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)")" "↑ 1 newer" # and scrolls the feed
 hasnt "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)$(click 3 "$(row_of '─ RECENT')" 64)")" "newer"
@@ -76,14 +76,14 @@ hasnt "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)$(click 3 "$(ro
 frame 80 --press $'\e[Ma!!' >/dev/null; assert "$(state_of pass1)" passed
 frame 80 --press $'\e[Ma\xe2\x30\e[Ma\xe2\x30' >/dev/null; assert "$(state_of pass1)" passed  # column 194: bytes, not UTF-8
 # a narrow prompt keeps its ✓ send / ✗ cancel targets: cancel, then ↵ would drop
-{ printf 'yes'; click 40 69; echo; } | "$COORD" watch --once --width 44 --height 70 \
+{ printf 'yes'; click 40 69; echo; } | "$FILO" watch --once --width 44 --height 70 \
   --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")x" >/dev/null
 assert "$(state_of dead1)" blocked
 # prompts: typed, with ✓ send / ✗ cancel on the reply row (row 69)
-{ printf 'no'; click 75 69; echo; } | frame 80 --press m >/dev/null; hasnt "$("$COORD" log)" "msg - no"
-{ printf 'drop\e'; } | frame 80 --press m >/dev/null; hasnt "$("$COORD" log)" "msg - drop"   # esc cancels
+{ printf 'no'; click 75 69; echo; } | frame 80 --press m >/dev/null; hasnt "$("$FILO" log)" "msg - no"
+{ printf 'drop\e'; } | frame 80 --press m >/dev/null; hasnt "$("$FILO" log)" "msg - drop"   # esc cancels
 has "$( { printf 'hi therex\177'; click 65 69; } | frame 80 --press m)" "ok: sent"
-has "$("$COORD" log)" "msg - hi there"
+has "$("$FILO" log)" "msg - hi there"
 # a click never skips drop's typed confirmation
 has "$( { click 65 69; } | frame 80 --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")x")" "x drop"
 assert "$(state_of dead1)" blocked
@@ -95,9 +95,9 @@ has "$out" "▲ passed · needs your approval"
 has "$out" "           passes review"                                           # its goal
 has "$out" "  1 brief  2 findings  3 diff  4 log  5 output  6 history"
 has "$out" "1-6 tab  j/k scroll  esc back  a approve  r reject  p pager"
-out="$("$COORD" watch --once --width 60 --height 40 --open pass1 --tab diff)"   # the design's own width
+out="$("$FILO" watch --once --width 60 --height 40 --open pass1 --tab diff)"   # the design's own width
 has "$out" "▲ needs approval"; has "$out" " j/k scroll  esc back  a approve  r reject  n/N file"   # the bar sheds 1-6, never the tab's keys
-view() { "$COORD" watch --once --width 80 --height "${H:-70}" --open "$@"; }
+view() { "$FILO" watch --once --width 80 --height "${H:-70}" --open "$@"; }
 # 3a brief: a headed section per field, deps, what it blocks, who wrote it
 out="$(view pass1)"
 has "$out" $' Goal\n   file.txt gains a line'
@@ -112,7 +112,7 @@ has "$out" " Round 1  passed · evidence ●●○ tests · "
 has "$out" '   "looks right"'; has "$out" $' Checks\n   $ test -f file.txt\n   – live check  not run'
 # 3c diff: the summary, then a rule per file, no git headers
 out="$(view pass1 --tab diff)"
-has "$out" " 1 file  +1 −0"; has "$out" "branch coord/pass1 (round 1)"
+has "$out" " 1 file  +1 −0"; has "$out" "branch filo/pass1 (round 1)"
 has "$out" " ── file.txt ──"; has "$out" " +change by pass1.r1.worker"; hasnt "$out" "diff --git"; hasnt "$out" "index "
 has "$(view pass1 --tab log)" "the merge's checks haven't run"
 # 3e output: the newest round, under its role, round and end
@@ -129,27 +129,27 @@ has "$(view pass1 --press $'\e')" "─ WORK "                                  #
 has "$(view pass1 --press "$(click 3 1)")" "─ WORK "                          # so does a click on "esc ‹"
 has "$(PAGER='head -n1' view pass1 --press p)" "Please do the thing."          # p: the tab in $PAGER
 # a running agent's output follows its tail until you scroll up
-for i in $(seq -w 1 50); do echo "line $i"; done >> .coordinator/log/busy1.r1.worker.log
+for i in $(seq -w 1 50); do echo "line $i"; done >> .filo/log/busy1.r1.worker.log
 has "$(H=14 view busy1 --tab output)" "line 50"
 hasnt "$(H=14 view busy1 --tab output --press k)" "line 50"
 has "$(H=14 view busy1 --tab output --press k)" "of 53"
 # the newest output stays the newest: a new round's log takes over, still followed
-echo "critic here" > .coordinator/log/busy1.r1.critic.log
+echo "critic here" > .filo/log/busy1.r1.critic.log
 has "$(H=14 view busy1 --tab output)" "critic · round 1"
 has "$(H=14 view busy1 --tab output --press '[')" "line 01"                  # an older round starts at its top
 has "$(H=14 view busy1 --tab output --press '[]')" "critic here"             # ] past the end: the newest again
-rm .coordinator/log/busy1.r1.critic.log
+rm .filo/log/busy1.r1.critic.log
 # new files join the diff whatever their names, and nothing reaches stderr
-printf 'a\nb\n' > .coordinator/worktrees/pass1/café.txt
+printf 'a\nb\n' > .filo/worktrees/pass1/café.txt
 out="$(view pass1 --tab diff 2>"$TMP/err")"
 has "$out" "café.txt (new)"; has "$out" " ── café.txt ──"; has "$out" " +b"; assert "$(cat "$TMP/err")" ""
-assert "$(git -c core.quotePath=false -C .coordinator/worktrees/pass1 status --short café.txt)" "?? café.txt"   # the real index untouched
-rm .coordinator/worktrees/pass1/café.txt
-assert "$(ls .coordinator/watch.* 2>/dev/null || true)" ""                   # its scratch files leave with it
+assert "$(git -c core.quotePath=false -C .filo/worktrees/pass1 status --short café.txt)" "?? café.txt"   # the real index untouched
+rm .filo/worktrees/pass1/café.txt
+assert "$(ls .filo/watch.* 2>/dev/null || true)" ""                   # its scratch files leave with it
 # narrow: the tab bar keeps all six; a bad --tab is refused
-has "$("$COORD" watch --once --width 44 --height 30 --open pass1)" "6 hist"
-refuses "--tab is one of 1-6" "$COORD" watch --once --open pass1 --tab nope
-refuses 'no unit "nope"' "$COORD" watch --once --open nope
+has "$("$FILO" watch --once --width 44 --height 30 --open pass1)" "6 hist"
+refuses "--tab is one of 1-6" "$FILO" watch --once --open pass1 --tab nope
+refuses 'no unit "nope"' "$FILO" watch --once --open nope
 # mouse: a tab name switches, the wheel scrolls, a unit in done opens its view
 bar=$(sed -n 4p <<< "$(view pass1)")
 has "$(view pass1 --press "$(click "$(col_of "$bar" diff)" 4)")" " ── file.txt ──"
@@ -170,45 +170,45 @@ hasnt "$(frame 80)" "≡ research.1"
 # reopen the blocked unit (selected first now)
 has "$(frame 80 --press o)" "ok: REOPENED dead1"
 # a refused action shows the engine's reason (no session: the relay can't start)
-has "$(frame 80 --press w)" "✗ refused: no session for this run (coord init)"
+has "$(frame 80 --press w)" "✗ refused: no session for this run (filo init)"
 # messages and prompts read their answer from the reply line
 has "$(echo "use httpx" | frame 80 --press m)" "ok: sent; the coordinator wakes to read it"
-has "$("$COORD" log)" "msg - use httpx"
+has "$("$FILO" log)" "msg - use httpx"
 
 # auto-merge: a clean pass isn't "needs you", a pass with notes is
-printf 'autonomy=auto-merge\n' >> .coordinator/config.conf
-"$COORD" unit add noted --kind chore --goal noted >/dev/null
-"$COORD" dispatch noted --role worker --brief "$TMP/brief" >/dev/null; wait_for is_state noted built
-FAKE_CRITIC=notepass "$COORD" dispatch noted --role critic >/dev/null; wait_for is_state noted passed
+printf 'autonomy=auto-merge\n' >> .filo/config.conf
+"$FILO" unit add noted --kind chore --goal noted >/dev/null
+"$FILO" dispatch noted --role worker --brief "$TMP/brief" >/dev/null; wait_for is_state noted built
+FAKE_CRITIC=notepass "$FILO" dispatch noted --role critic >/dev/null; wait_for is_state noted passed
 out="$(frame 80)"
 has "$out" "▲ noted  passed with notes · needs you"
 has "$out" "notes: check the migration"
 
 # the merge's checks failed: the view opens on their log
 sed 's/-gt 1/-gt 99/' "$TMP/brief" > "$TMP/strict"
-"$COORD" unit add strict --kind chore --goal strict >/dev/null
-"$COORD" dispatch strict --role worker --brief "$TMP/strict" >/dev/null; wait_for is_state strict built
-FAKE_CRITIC=notepass "$COORD" dispatch strict --role critic >/dev/null; wait_for is_state strict passed
-"$COORD" approve strict >/dev/null; "$COORD" merge strict >/dev/null 2>&1 || true
+"$FILO" unit add strict --kind chore --goal strict >/dev/null
+"$FILO" dispatch strict --role worker --brief "$TMP/strict" >/dev/null; wait_for is_state strict built
+FAKE_CRITIC=notepass "$FILO" dispatch strict --role critic >/dev/null; wait_for is_state strict passed
+"$FILO" approve strict >/dev/null; "$FILO" merge strict >/dev/null 2>&1 || true
 assert "$(state_of strict)" handback
 out="$(view strict)"
 has "$out" " Merge of round 1  "; has "$out" "✗ failed · exit 1"; has "$out" '$ test "$(wc -l < file.txt)" -gt 99'
 has "$out" "exit 1 · sent back to the worker at"
 has "$(view strict --tab findings)" "✗ the merge re-ran the checks: exit 1 (see 4 log)"
-touch -d '+5 seconds' .coordinator/log/strict.verify.log                     # a new merge rewrote the log
+touch -d '+5 seconds' .filo/log/strict.verify.log                     # a new merge rewrote the log
 has "$(view strict --tab log)" " Merge  running"
 
 # DEL and C1 controls in event text never reach the terminal
-"$COORD" msg strict $'odd\x7f\xc2\x9b31m text' >/dev/null
+"$FILO" msg strict $'odd\x7f\xc2\x9b31m text' >/dev/null
 out="$(frame 80)"; has "$out" "odd31m text"; hasnt "$out" $'\xc2\x9b'
 has "$(view strict --tab history)" "odd"; hasnt "$(view strict --tab history)" $'\x7f'
 
 # an agent restarted after a death: its output tab says running, not the old death
-fake_resume; echo sess-1 > .coordinator/session
-"$COORD" unit add again --kind chore --goal again >/dev/null
-FAKE_WORKER=exit "$COORD" dispatch again --role worker --brief "$TMP/brief" >/dev/null
-"$COORD" relay --once --interval 0.1 >/dev/null; wait_for is_state again stalled
-FAKE_WORKER=sleep "$COORD" dispatch again --role worker >/dev/null
+fake_resume; echo sess-1 > .filo/session
+"$FILO" unit add again --kind chore --goal again >/dev/null
+FAKE_WORKER=exit "$FILO" dispatch again --role worker --brief "$TMP/brief" >/dev/null
+"$FILO" relay --once --interval 0.1 >/dev/null; wait_for is_state again stalled
+FAKE_WORKER=sleep "$FILO" dispatch again --role worker >/dev/null
 out="$(view again --tab output)"; has "$out" " worker · round 1  0m of 20m · running"; hasnt "$out" "died"
 
 echo "  watch ok"

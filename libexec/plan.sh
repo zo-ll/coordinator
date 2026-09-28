@@ -4,18 +4,18 @@
 #   plan.sh -> PROPOSE critic=… researcher=… lane.default=… lane.strong=… autonomy=…
 #              ASK models autonomy [roles]
 #
-# Writes $COORD_HOME/proposal.conf (machine-readable) for apply.sh.
+# Writes $FILO_HOME/proposal.conf (machine-readable) for apply.sh.
 # Rules: one spawnable harness forces the role map and lanes; model is ALWAYS
 # asked (default is only chosen if the user affirms it).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFG="$HERE/cfg.sh"
-COORD_HOME="${COORD_HOME:-$HOME/.coordinator}"
-ENV_CONF="${COORD_ENV_CONF:-$COORD_HOME/env.conf}"
-CONFIG="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
-PROPOSAL="${COORD_PROPOSAL:-$COORD_HOME/proposal.conf}"
-mkdir -p "$COORD_HOME"
+FILO_HOME="${FILO_HOME:-$HOME/.filo}"
+ENV_CONF="${FILO_ENV_CONF:-$FILO_HOME/env.conf}"
+CONFIG="${FILO_CONFIG:-$PWD/.filo/config.conf}"
+PROPOSAL="${FILO_PROPOSAL:-$FILO_HOME/proposal.conf}"
+mkdir -p "$FILO_HOME"
 
 get() { "$CFG" get "$ENV_CONF" "$1" 2>/dev/null || true; }
 
@@ -73,9 +73,9 @@ ask+=("critic.model=" "researcher.model=" "lane.default.model=")
 [ -n "$lane_strong" ] && ask+=("lane.strong.model=")
 ask+=("autonomy=auto-merge")
 
-# the user's own defaults (coord role --global) are already decided: leave
+# the user's own defaults (filo role --global) are already decided: leave
 # the repo key empty so they apply, and don't ask about them
-ROLES="${COORD_ROLES:-$COORD_HOME/roles.conf}"
+ROLES="${FILO_ROLES:-$FILO_HOME/roles.conf}"
 for k in critic.harness critic.model researcher.harness researcher.model \
          lane.default.harness lane.default.model lane.strong.harness lane.strong.model; do
   gv="$("$CFG" get "$ROLES" "$k" 2>/dev/null || true)"

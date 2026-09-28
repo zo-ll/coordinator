@@ -1,4 +1,4 @@
-# watch.awk: the event log as coord watch reads it. One record per line,
+# watch.awk: the event log as filo watch reads it. One record per line,
 # tab-separated, first field the record type:
 #   S ts                           first event (the run's start)
 #   F ts sentence                  one feed line per event worth telling

@@ -1,6 +1,6 @@
-# core.sh: shared by every coord command (sourced by bin/coord).
+# core.sh: shared by every filo command (sourced by bin/filo).
 #
-# A run lives in <repo>/.coordinator/: the event log (events.log), config,
+# A run lives in <repo>/.filo/: the event log (events.log), config,
 # standing orders, playbook overrides, and (gitignored) briefs, logs, batches,
 # worktrees and the relay's lock. The log is the only state; lib/model.awk is
 # its only parser and holds the transition table.
@@ -21,29 +21,29 @@ refuse() {
   return 1
 }
 
-# events_path: $COORD_EVENTS, else the nearest .coordinator/events.log at or
-# above the working directory (a worktree under <repo>/.coordinator/worktrees
-# finds its repo's log), else ./.coordinator/events.log.
+# events_path: $FILO_EVENTS, else the nearest .filo/events.log at or
+# above the working directory (a worktree under <repo>/.filo/worktrees
+# finds its repo's log), else ./.filo/events.log.
 existing_events_path() {
-  if [ -n "${COORD_EVENTS:-}" ]; then
-    case "$COORD_EVENTS" in /*) printf '%s' "$COORD_EVENTS" ;; *) printf '%s' "$PWD/$COORD_EVENTS" ;; esac
+  if [ -n "${FILO_EVENTS:-}" ]; then
+    case "$FILO_EVENTS" in /*) printf '%s' "$FILO_EVENTS" ;; *) printf '%s' "$PWD/$FILO_EVENTS" ;; esac
     return 0
   fi
   local d=$PWD
   while :; do
-    [ -f "$d/.coordinator/events.log" ] && { printf '%s' "$d/.coordinator/events.log"; return 0; }
+    [ -f "$d/.filo/events.log" ] && { printf '%s' "$d/.filo/events.log"; return 0; }
     [ "$d" = / ] && return 1
     d=$(dirname "$d")
   done
 }
-events_path() { existing_events_path || printf '%s' "$PWD/.coordinator/events.log"; }
+events_path() { existing_events_path || printf '%s' "$PWD/.filo/events.log"; }
 
 LOG=$(events_path)
 RUN=$(dirname "$LOG")
 REPO=$(dirname "$RUN")
-CONFIG=${COORD_CONFIG:-$RUN/config.conf}
-COORD_HOME=${COORD_HOME:-$HOME/.coordinator}
-ENV_CONF=${COORD_ENV_CONF:-$COORD_HOME/env.conf}
+CONFIG=${FILO_CONFIG:-$RUN/config.conf}
+FILO_HOME=${FILO_HOME:-$HOME/.filo}
+ENV_CONF=${FILO_ENV_CONF:-$FILO_HOME/env.conf}
 
 # cfg_get <file> <key>: value of the last assignment; 1 when absent
 cfg_get() {
@@ -163,8 +163,8 @@ rank() { # rank <level>: 0..3, or -1 if unknown
 identity() {
   ID_EMAIL=$(git -C "$1" config user.email 2>/dev/null) || ID_EMAIL=""
   ID_NAME=$(git -C "$1" config user.name 2>/dev/null) || ID_NAME=""
-  [ -n "$ID_EMAIL" ] || ID_EMAIL=coord@local
-  [ -n "$ID_NAME" ] || ID_NAME=coordinator
+  [ -n "$ID_EMAIL" ] || ID_EMAIL=filo@local
+  [ -n "$ID_NAME" ] || ID_NAME=filo
 }
 
 # hygiene_commit <repo> <path> <message>: force-add only this path and commit
@@ -204,7 +204,7 @@ build_argv() {
   recipe=$(cfg_get "$ENV_CONF" "harness.$h.exec") || {
     fail 1 "invoke: no exec recipe for harness '%s' in %s" "$h" "$ENV_CONF"; return 1; }
   text=$(cat "$prompt")
-  agents=${COORD_AGENTS:-$SKILL/agents}
+  agents=${FILO_AGENTS:-$SKILL/agents}
   [ -f "$agents/$role.md" ] && text="$(cat "$agents/$role.md")"$'\n\n'"$text"
   local IFS='|'
   read -r -a toks <<< "$recipe"
@@ -231,7 +231,7 @@ launch() {
     # never hand a held lock to a long-lived agent
     [ -z "${COMMIT_LOCK:-}" ] || exec {COMMIT_LOCK}>&-
     [ -z "${RELAY_LOCK:-}" ] || exec {RELAY_LOCK}>&-
-    export COORD_EVENTS="$LOG" COORD_OWES="$slug"
+    export FILO_EVENTS="$LOG" FILO_OWES="$slug"
     cd "$cwd" || exit 1
     setsid "$@" >>"$logf" 2>&1 </dev/null &
     echo $!

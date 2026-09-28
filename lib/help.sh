@@ -1,9 +1,9 @@
-# help.sh: `coord help [verb]` (sourced by bin/coord; needs no repo).
+# help.sh: `filo help [verb]` (sourced by bin/filo; needs no repo).
 
 help_index() {
   cat <<'EOF'
-coord: the coordinator engine. One line out per result; a refusal is
-"REFUSED <unit> <event>: <reason>". `coord help <verb>` for details.
+filo: the coordinator engine. One line out per result; a refusal is
+"REFUSED <unit> <event>: <reason>". `filo help <verb>` for details.
 
 you:
   watch                    follow the run live and act on what waits for you
@@ -35,8 +35,8 @@ EOF
 help_verb() {
   case "$1" in
     watch) cat <<'EOF'
-coord watch                                 the live view (in its own terminal)
-coord watch --once [--width N] [--height N] [--open <unit> [--tab <tab>]]
+filo watch                                 the live view (in its own terminal)
+filo watch --once [--width N] [--height N] [--open <unit> [--tab <tab>]]
                                             one frame on stdout, then exit
   The only command meant for people. It shows whether the coordinator is
   moving, one "needs you" line when something waits on you, and WORK: every
@@ -55,7 +55,7 @@ coord watch --once [--width N] [--height N] [--open <unit> [--tab <tab>]]
 EOF
     ;;
     init) cat <<'EOF'
-coord init [--accept | --answers "key=value ..."] [--harness <h>] [--session <id>]
+filo init [--accept | --answers "key=value ..."] [--harness <h>] [--session <id>]
   Detects the harnesses; in an unconfigured repo prints PROPOSE and an ASK
   block and stops: ask the user, then re-run with --accept or --answers.
   Then starts the run: SESSION ... and RELAY pid=... If no session id can be
@@ -63,58 +63,58 @@ coord init [--accept | --answers "key=value ..."] [--harness <h>] [--session <id
 EOF
     ;;
     brief) cat <<'EOF'
-coord brief <id>
+filo brief <id>
   -> BRIEF <id> <path> needs=<fields>
   Writes the unit's next worker brief as a draft: the playbook's fields for a
   first round, the last brief plus CORRECTION for a later one. Replace every
-  <fill: ...>; `coord dispatch <id> --role worker` then uses it. VERIFY lines
+  <fill: ...>; `filo dispatch <id> --role worker` then uses it. VERIFY lines
   start with "$ " and are re-run by the critic and by merge. Calling it again
   returns the same draft.
 EOF
     ;;
     gate) cat <<'EOF'
-coord gate add "<question>" --default "<choice>" [--options "<a · b>"]
+filo gate add "<question>" --default "<choice>" [--options "<a · b>"]
   -> GATE G<n> open default=<choice>      go ahead on the default now
-coord gate decide G<n> "<answer>"
+filo gate decide G<n> "<answer>"
   -> GATE G<n> decided: <answer>           (and NEXT when it differs)
-coord gate list                           the open gates
+filo gate list                           the open gates
 EOF
     ;;
     role) cat <<'EOF'
-coord role
+filo role
   -> ROLE <role> harness=<h> model=<m> skills=<a,b>   one line per role
-coord role <role> [--global] [--harness <h>] [--model <m>]
+filo role <role> [--global] [--harness <h>] [--model <m>]
                   [--skill <name>]... [--drop-skill <name>]...
   -> ROLE <role> ...   the role after the change
   Roles: worker, worker:<lane> (e.g. worker:strong), critic, researcher.
-  Settings live in the repo's .coordinator/config.conf; --global writes your
-  defaults in ~/.coordinator/roles.conf, which every repo uses unless it sets
+  Settings live in the repo's .filo/config.conf; --global writes your
+  defaults in ~/.filo/roles.conf, which every repo uses unless it sets
   its own. The model is checked against the harness where it can be; a skill
-  must be installed (coord skills <role>). A role's skills are named in every
+  must be installed (filo skills <role>). A role's skills are named in every
   prompt it gets, with the SKILL.md path to read.
 EOF
     ;;
-    skills) echo 'coord skills [<role>]   -> SKILL <name> <path>, the role'"'"'s own harness first (default role: worker)' ;;
+    skills) echo 'filo skills [<role>]   -> SKILL <name> <path>, the role'"'"'s own harness first (default role: worker)' ;;
     standing) cat <<'EOF'
-coord standing add "<rule>"   -> STANDING <n>: <rule>
-coord standing                the standing orders
+filo standing add "<rule>"   -> STANDING <n>: <rule>
+filo standing                the standing orders
   One constraint per rule; every launch and every batch carries them.
 EOF
     ;;
     unit) cat <<'EOF'
-coord unit add <id> --kind <kind> --goal "<goal>" [--deps a,b] [--risk <risk>]
+filo unit add <id> --kind <kind> --goal "<goal>" [--deps a,b] [--risk <risk>]
   -> ADDED <id> kind=<kind>
   kind picks the playbook (feature, bugfix, refactor, chore, or a repo
-  playbook in .coordinator/playbooks/). A unit is ready when its deps are
+  playbook in .filo/playbooks/). A unit is ready when its deps are
   merged or dropped. --risk routes the worker to lane routing.<risk>.
   Ids are [A-Za-z0-9_-]+.
-coord unit next
+filo unit next
   -> the ready ids, space-separated (nothing when none)
 EOF
     ;;
     dispatch) cat <<'EOF'
-coord dispatch <id> --role worker [--brief <file>]   (default: the coord brief draft)
-coord dispatch <id> --role critic
+filo dispatch <id> --role worker [--brief <file>]   (default: the filo brief draft)
+filo dispatch <id> --role critic
   -> DISPATCHED <id> role=<r> round=<n> slug=<s> pid=<p> wt=<path> log=<path>
   The engine computes the round and slug, creates the worktree, and appends
   the finish contract. A stalled worker redispatched without --brief
@@ -122,19 +122,19 @@ coord dispatch <id> --role critic
 EOF
     ;;
     research) cat <<'EOF'
-coord research --brief <file>
+filo research --brief <file>
   -> RESEARCH <slug> pid=<p> report=<path> log=<path>
   The brief needs GOAL: (TIMEBOX: optional). The researcher writes a decision
   brief to the report path and finishes; its event wakes the coordinator.
 EOF
     ;;
     finish) cat <<'EOF'
-coord finish --result <result> --summary "<one line>" [--slug <slug>]
+filo finish --result <result> --summary "<one line>" [--slug <slug>]
              [--evidence <level>] [--ran "<command>"]... [--flag <flag>]...
   -> FINISHED <slug> -> <state> | DUP <slug>
   For role agents. Run it once, as the last thing you do: it records your
   result and wakes the coordinator. Your prompt's FINISH CONTRACT gives the
-  exact command, with the slug you owe (COORD_OWES); never invent one.
+  exact command, with the slug you owe (FILO_OWES); never invent one.
   worker:     --result done|partial
   critic:     --result pass|handback, --evidence none|typecheck|tests|live,
               one --ran per command you ran, --flag only for what you proved,
@@ -144,16 +144,16 @@ coord finish --result <result> --summary "<one line>" [--slug <slug>]
 EOF
     ;;
     approve|reject|msg|block|reopen|drop) cat <<'EOF'
-coord approve <id> ["<note>"]      the user approved a passed unit
-coord reject <id> ["<note>"]       the user rejected it; back to handback
-coord msg <id|-> "<text>"          a message for the coordinator (wakes it)
-coord block <id> --reason "<r>"    stop the unit (and its live launch)
-coord reopen <id> --reason "<r>"   unblock it
-coord drop <id> --reason "<r>"     abandon it for good (final); prints READY/DONE like merge
+filo approve <id> ["<note>"]      the user approved a passed unit
+filo reject <id> ["<note>"]       the user rejected it; back to handback
+filo msg <id|-> "<text>"          a message for the coordinator (wakes it)
+filo block <id> --reason "<r>"    stop the unit (and its live launch)
+filo reopen <id> --reason "<r>"   unblock it
+filo drop <id> --reason "<r>"     abandon it for good (final); prints READY/DONE like merge
 EOF
     ;;
     merge) cat <<'EOF'
-coord merge <id>
+filo merge <id>
   -> MERGED <id> sha=<sha>, then READY <ids> and DONE when they apply
   Needs a recorded approval of this round, or, under autonomy=auto-merge (the
   default), a clean pass: no critic notes and no --risk. finish starts that
@@ -163,28 +163,28 @@ coord merge <id>
 EOF
     ;;
     status) cat <<'EOF'
-coord status
+filo status
   STATUS relay=<pid> alive=0|1 undelivered=<n> inflight=<n>
   UNIT <id> <state> kind=… round=… ready=… pid=… alive=… goal=…
   LOG <id> <slug> <last line of a live launch's log>
 EOF
     ;;
-    log) echo 'coord log [<id>]   "<seq> <type> <unit|-> <what>" per event' ;;
-    done) echo 'coord done   -> DONE units=<n> (exit 0) | OPEN <ids> (exit 1)' ;;
-    detect) echo 'coord detect   -> DETECT current=<h> installed=<a,b> spawnable=<a,b>' ;;
-    plan) echo 'coord plan   -> PROPOSE <key=value>... then an ASK block of fields to confirm' ;;
-    apply) echo 'coord apply --accept | --answers "key=value ..."   -> OK config=<path> | FAIL <field>: <reason>' ;;
+    log) echo 'filo log [<id>]   "<seq> <type> <unit|-> <what>" per event' ;;
+    done) echo 'filo done   -> DONE units=<n> (exit 0) | OPEN <ids> (exit 1)' ;;
+    detect) echo 'filo detect   -> DETECT current=<h> installed=<a,b> spawnable=<a,b>' ;;
+    plan) echo 'filo plan   -> PROPOSE <key=value>... then an ASK block of fields to confirm' ;;
+    apply) echo 'filo apply --accept | --answers "key=value ..."   -> OK config=<path> | FAIL <field>: <reason>' ;;
     start) cat <<'EOF'
-coord start [--harness <h>] [--session <id>] [--no-relay]
+filo start [--harness <h>] [--session <id>] [--no-relay]
   -> SESSION <id> source=<...> harness=<h> repo=<repo>  [RELAY pid=<pid>]
 EOF
     ;;
     relay) cat <<'EOF'
-coord relay [--once] [--interval N] [--max-attempts N] [--backoff N]   (started by init)
-coord relay --detach   restart this run's relay in the background, unless one is alive
+filo relay [--once] [--interval N] [--max-attempts N] [--backoff N]   (started by init)
+filo relay --detach   restart this run's relay in the background, unless one is alive
 EOF
     ;;
-    cfg) echo 'coord cfg get|set|unset|keys <file> ...   flat key=value config' ;;
-    *) echo "coord: no help for \"$1\"" >&2; return 2 ;;
+    cfg) echo 'filo cfg get|set|unset|keys <file> ...   flat key=value config' ;;
+    *) echo "filo: no help for \"$1\"" >&2; return 2 ;;
   esac
 }

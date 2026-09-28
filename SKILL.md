@@ -1,5 +1,5 @@
 ---
-name: coordinator
+name: filo
 description: >-
   Turn the current agent into a coordinator: cut a goal into units, have one
   worker build each in its own git worktree, an independent critic review it,
@@ -10,21 +10,21 @@ description: >-
 
 # Coordinator
 
-You supply judgment; the engine, `bin/coord` in this skill's directory,
+You supply judgment; the engine, `bin/filo` in this skill's directory,
 supplies everything else and refuses illegal moves with one `REFUSED` line.
-`bin/coord help [verb]` documents every command; read only their output.
+`bin/filo help [verb]` documents every command; read only their output.
 
 ## Start
 
-Run `bin/coord init`. If it prints an ASK block, put each key and its
+Run `bin/filo init`. If it prints an ASK block, put each key and its
 proposed value to the user as a real question and wait for the reply, then
 run what its NEXT line says.
 
 Each role agent's harness, model, and skills are the user's choice:
-`bin/coord role` shows them. Change them only when the user asks.
+`bin/filo role` shows them. Change them only when the user asks.
 
 Once the run has started, tell the user once that they can follow it live, and
-approve from there, with `<this skill's directory>/bin/coord watch` in another
+approve from there, with `<this skill's directory>/bin/filo watch` in another
 terminal.
 
 ## Size the job, pick a shape
@@ -51,7 +51,7 @@ A worker sees only its brief. GOAL must be executable by a stranger with no
 chat access; ACCEPTANCE checkable; VERIFY commands that prove it (the critic
 and the merge re-run them). Paste upstream results into CONTEXT in full. A
 field you can't fill is a unit you haven't scoped. When you catch yourself
-repeating an instruction, make it `bin/coord standing add`.
+repeating an instruction, make it `bin/filo standing add`.
 
 ## The loop
 
@@ -67,7 +67,7 @@ new round, ask again.
 ## Decisions
 
 Don't block on a choice the brief and repo don't settle if it can be undone
-later: `bin/coord gate add "<question>" --default <choice>`, go ahead on the
+later: `bin/filo gate add "<question>" --default <choice>`, go ahead on the
 default, and list open gates together in your next report. Irreversible
 choices always wait for the user: dropping a unit, deleting data or history,
 pushing, and merging anything the engine says needs their approval.
@@ -75,17 +75,17 @@ pushing, and merging anything the engine says needs their approval.
 ## Helpers
 
 For read-only work (a judge, a reviewer, a research question) use your
-harness's own subagents if it has them, else `bin/coord research`. Tell them
+harness's own subagents if it has them, else `bin/filo research`. Tell them
 to read and run only, never edit or commit, and record their outcome through
 the command you act on (a drop reason, a reject note, a brief). Workers and
-critics always go through `bin/coord dispatch`.
+critics always go through `bin/filo dispatch`.
 
 ## Never
 
 - Read a worker's diff: the critic is the only content reviewer.
 - Write a slug, a round, or a critic brief, or commit for a worker.
-- Answer the user with `bin/coord msg`: that is their channel to you, and it
+- Answer the user with `bin/filo msg`: that is their channel to you, and it
   wakes you again. Answer in your own window.
-- `tail` logs, `ps` for agents, or open `.coordinator/` files other than the
-  draft `bin/coord brief` prints: `bin/coord status` and `bin/coord log` are
+- `tail` logs, `ps` for agents, or open `.filo/` files other than the
+  draft `bin/filo brief` prints: `bin/filo status` and `bin/filo log` are
   the views.

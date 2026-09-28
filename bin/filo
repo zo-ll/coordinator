@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# coord: the coordinator engine. One subcommand per protocol step, one line
+# filo: the coordinator engine. One subcommand per protocol step, one line
 # of output per result; refusals are "REFUSED <unit> <event>: <reason>".
 # bash 4.4+, coreutils, util-linux (flock, setsid), awk, git. See SPEC.md.
 set -euo pipefail
 
 src=${BASH_SOURCE[0]}
-while [ -L "$src" ] && command -v readlink >/dev/null 2>&1; do   # bin/coord symlinked elsewhere
+while [ -L "$src" ] && command -v readlink >/dev/null 2>&1; do   # bin/filo symlinked elsewhere
   t=$(readlink "$src"); case "$t" in /*) src=$t ;; *) src=${src%/*}/$t ;; esac
 done
 case "$src" in */*) ;; *) src=./$src ;; esac
 SKILL=$(cd -P "${src%/*}/.." && pwd)
-SELF="$SKILL/bin/coord"
+SELF="$SKILL/bin/filo"
 
-usage='usage: coord <verb> ...   (coord help lists the verbs)'
+usage='usage: filo <verb> ...   (filo help lists the verbs)'
 verb=${1:-}
 [ $# -gt 0 ] && shift
 
@@ -29,7 +29,7 @@ esac
 
 case "$verb" in
   cfg|detect|plan|apply)
-    export COORD_CONFIG="$CONFIG"
+    export FILO_CONFIG="$CONFIG"
     exec "$SKILL/libexec/$verb.sh" "$@" ;;
 esac
 
@@ -65,5 +65,5 @@ case "$verb" in
   start)    cmd_start "$@" ;;
   init)     cmd_init "$@" ;;
   "")       echo "$usage" >&2; exit 2 ;;
-  *)        echo "coord: unknown command \"$verb\"" >&2; echo "$usage" >&2; exit 2 ;;
+  *)        echo "filo: unknown command \"$verb\"" >&2; echo "$usage" >&2; exit 2 ;;
 esac

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run every test/*.test.sh in a fresh bash process. Each test creates its own
-# temp repo and drives bin/coord with a fake harness; no network, no real agents.
+# temp repo and drives bin/filo with a fake harness; no network, no real agents.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

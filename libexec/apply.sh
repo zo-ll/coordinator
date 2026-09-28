@@ -11,10 +11,10 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFG="$HERE/cfg.sh"
-COORD_HOME="${COORD_HOME:-$HOME/.coordinator}"
-ENV_CONF="${COORD_ENV_CONF:-$COORD_HOME/env.conf}"
-PROPOSAL="${COORD_PROPOSAL:-$COORD_HOME/proposal.conf}"
-config="${COORD_CONFIG:-$PWD/.coordinator/config.conf}"
+FILO_HOME="${FILO_HOME:-$HOME/.filo}"
+ENV_CONF="${FILO_ENV_CONF:-$FILO_HOME/env.conf}"
+PROPOSAL="${FILO_PROPOSAL:-$FILO_HOME/proposal.conf}"
+config="${FILO_CONFIG:-$PWD/.filo/config.conf}"
 answers=""
 
 while [ $# -gt 0 ]; do
@@ -28,7 +28,7 @@ done
 
 [ -f "$PROPOSAL" ] || { echo "FAIL proposal: run plan.sh first" >&2; exit 1; }
 
-tmp="$(mktemp "${COORD_HOME}/config.XXXXXX")"
+tmp="$(mktemp "${FILO_HOME}/config.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 cp "$PROPOSAL" "$tmp"
 
@@ -51,7 +51,7 @@ for k in critic.harness researcher.harness lane.default.harness lane.strong.harn
 done
 
 # Validate each model against its harness where the harness can tell.
-ROLES="${COORD_ROLES:-$COORD_HOME/roles.conf}"
+ROLES="${FILO_ROLES:-$FILO_HOME/roles.conf}"
 for p in critic researcher lane.default lane.strong; do
   m="$("$CFG" get "$tmp" "$p.model" 2>/dev/null || true)"
   [ -n "$m" ] || continue

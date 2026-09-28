@@ -12,7 +12,7 @@ algorithm), not routine work: each candidate costs a worker and a critic.
 3. When the passed candidates are in, a read-only judge (a helper) scores
    each worktree against ACCEPTANCE, picks one, and lists what's worth taking
    from the others. You read the verdict, never the diffs.
-4. Ask the user to approve the winner; `coord drop <loser> --reason "arena:
+4. Ask the user to approve the winner; `filo drop <loser> --reason "arena:
    <winner> chosen: <why>"` for the rest.
 5. Worth-keeping ideas become one small follow-up unit (`--deps <winner>`)
    with the judge's points pasted into CONTEXT.

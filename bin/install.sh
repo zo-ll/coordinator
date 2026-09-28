@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # Install this skill into every agent-harness skill dir found on the machine.
 #
-#   bin/install.sh              symlink this repo as <harness>/coordinator
+#   bin/install.sh              symlink this repo as <harness>/filo
 #   bin/install.sh --uninstall  remove those symlinks
 #
-# The repo root is the skill (SKILL.md, bin/coord, lib/, playbooks/, agents/),
+# The repo root is the skill (SKILL.md, bin/filo, lib/, playbooks/, agents/),
 # so it is symlinked as a directory: edits and `git pull` stay live. Safe and idempotent. Override the
-# target list with COORD_SKILL_DIRS (colon-separated) for testing.
+# target list with FILO_SKILL_DIRS (colon-separated) for testing.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NAME="${COORD_SKILL_NAME:-coordinator}"
+NAME="${FILO_SKILL_NAME:-filo}"
 
-if [ -n "${COORD_SKILL_DIRS:-}" ]; then
-  IFS=':' read -r -a DIRS <<< "$COORD_SKILL_DIRS"
+if [ -n "${FILO_SKILL_DIRS:-}" ]; then
+  IFS=':' read -r -a DIRS <<< "$FILO_SKILL_DIRS"
 else
   DIRS=(
     "$HOME/.pi/agent/skills"

@@ -1,10 +1,10 @@
 # roles.sh: who each role agent is (harness, model, skills), layered: the
-# repo's config.conf over the user's roles.conf (sourced by bin/coord).
+# repo's config.conf over the user's roles.conf (sourced by bin/filo).
 #
 # Roles: worker (lane default), worker:<lane>, critic, researcher; their
 # config prefixes: lane.default, lane.<lane>, critic, researcher.
 
-ROLES_GLOBAL=${COORD_ROLES:-$COORD_HOME/roles.conf}
+ROLES_GLOBAL=${FILO_ROLES:-$FILO_HOME/roles.conf}
 
 cfg_keys() { [ ! -f "$1" ] || "$SKILL/libexec/cfg.sh" keys "$1"; }
 
@@ -88,7 +88,7 @@ cmd_role() {
   h=${F[harness]:-$(role_get "$p" harness)}
   m=${F[model]-$(role_get "$p" model)}
   if [ -n "${F[harness]:-}" ] && [ -z "$(cfg_val "$ENV_CONF" "harness.$h.bin")" ]; then
-    refuse "" role "\"$h\" is not a spawnable harness here (coord init detects them)"; return
+    refuse "" role "\"$h\" is not a spawnable harness here (filo init detects them)"; return
   fi
   if [ -n "${F[harness]:-}${F[model]+x}" ] && [ -n "$h" ]; then
     local why; why=$("$SKILL/libexec/models.sh" "$h" "$m" 2>&1 >/dev/null) || [ $? = 2 ] || { refuse "" role "$why"; return; }
@@ -96,7 +96,7 @@ cmd_role() {
   skills=$(cfg_val "$file" "$p.skills")
   while IFS= read -r s; do
     [ -n "$s" ] || continue
-    skill_path "${h:-none}" "$s" >/dev/null || { refuse "" role "no skill \"$s\" (coord skills $role lists them)"; return; }
+    skill_path "${h:-none}" "$s" >/dev/null || { refuse "" role "no skill \"$s\" (filo skills $role lists them)"; return; }
     [[ ,$skills, == *",$s,"* ]] || skills+="${skills:+,}$s"
   done <<< "${FM[skill]:-}"
   while IFS= read -r s; do

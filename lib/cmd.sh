@@ -1,4 +1,4 @@
-# cmd.sh: the coord subcommands (sourced by bin/coord after core.sh).
+# cmd.sh: the filo subcommands (sourced by bin/filo after core.sh).
 
 declare -gA F FM
 
@@ -49,7 +49,7 @@ cmd_unit() {
       ids=$(model units | awk -F"$US" '$19 == 1 { print $1 }' | paste -sd' ' -)
       [ -z "$ids" ] || echo "$ids"
       ;;
-    *) fail 2 'usage: coord unit add|next ...' ;;
+    *) fail 2 'usage: filo unit add|next ...' ;;
   esac
 }
 
@@ -127,7 +127,7 @@ cmd_gate() {
       [ -f "$f" ] || return 0
       awk -F'\t' '$2 == "open" { printf "GATE %s open \"%s\" default=%s%s\n", $1, $3, $5, ($4 == "" ? "" : " options=" $4) }' "$f"
       ;;
-    *) fail 2 'usage: coord gate add|decide|list ...' ;;
+    *) fail 2 'usage: filo gate add|decide|list ...' ;;
   esac
 }
 
@@ -145,7 +145,7 @@ cmd_standing() {
       echo "STANDING $n: ${2//$'\n'/ }"
       ;;
     "") [ ! -f "$f" ] || cat "$f" ;;
-    *) fail 2 'usage: coord standing [add "<rule>"]' ;;
+    *) fail 2 'usage: filo standing [add "<rule>"]' ;;
   esac
 }
 
@@ -171,7 +171,7 @@ next_round() {
   esac
 }
 
-# make_worktree <id>: <run>/worktrees/<id> on coord/<id> off the base
+# make_worktree <id>: <run>/worktrees/<id> on filo/<id> off the base
 # (config merge.base, else main), reusing the branch if it exists. Sets
 # WT_PATH WT_BRANCH WT_BASE, or WT_ERR.
 make_worktree() {
@@ -179,7 +179,7 @@ make_worktree() {
   baseref=$(cfg_val "$CONFIG" merge.base); baseref=${baseref:-main}
   WT_BASE=$(git -C "$REPO" rev-parse --verify --quiet "$baseref^{commit}" 2>/dev/null) || {
     WT_ERR="base \"$baseref\" not found in $REPO"; return 1; }
-  WT_PATH="$RUN/worktrees/$id" WT_BRANCH="coord/$id"
+  WT_PATH="$RUN/worktrees/$id" WT_BRANCH="filo/$id"
   if [ -e "$WT_PATH" ] || [ -L "$WT_PATH" ]; then
     # left by a dispatch that never got recorded: reuse it if it is ours
     cur=$(git -C "$WT_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
@@ -241,9 +241,9 @@ artifacts_ignored() {
   f=$(git -C "$REPO" rev-parse --git-common-dir 2>/dev/null) || return 0
   case $f in /*) ;; *) f="$REPO/$f" ;; esac
   f="$f/info/exclude"
-  grep -qxF '# coordinator: build artifacts, never part of a change' "$f" 2>/dev/null && return 0
+  grep -qxF '# filo: build artifacts, never part of a change' "$f" 2>/dev/null && return 0
   mkdir -p "$(dirname "$f")"
-  printf '\n# coordinator: build artifacts, never part of a change\n%s\n' "$ARTIFACTS" >> "$f"
+  printf '\n# filo: build artifacts, never part of a change\n%s\n' "$ARTIFACTS" >> "$f"
 }
 
 # critic_brief <round> <worker brief>: the critic's assignment, composed from
@@ -266,7 +266,7 @@ critic_brief() {
 # finish_contract <role> <slug> [report]: the generated last section of a prompt
 finish_contract() {
   local role=$1 slug=$2 report=${3:-} call f
-  call="COORD_EVENTS=$LOG COORD_OWES=$slug $SELF finish"
+  call="FILO_EVENTS=$LOG FILO_OWES=$slug $SELF finish"
   echo "FINISH CONTRACT (do not skip; this is the completion protocol):"
   case "$role" in
     worker)
@@ -326,7 +326,7 @@ cmd_dispatch() {
   if [ "$role" = worker ]; then
     [ -n "$briefp" ] || { [ "$U_STATE" = stalled ] && briefp=$U_BRIEF; }
     [ -n "$briefp" ] || { [ -f "$(draft_path "$id")" ] && briefp=$(draft_path "$id"); }
-    [ -n "$briefp" ] || { rm -f "$body"; fail 2 'dispatch: a worker needs a brief (coord brief %s, or --brief <file>)' "$id"; return; }
+    [ -n "$briefp" ] || { rm -f "$body"; fail 2 'dispatch: a worker needs a brief (filo brief %s, or --brief <file>)' "$id"; return; }
     [ -r "$briefp" ] || { rm -f "$body"; refuse "$id" brief "not readable: $briefp"; return; }
     if grep -q '<fill:' "$briefp"; then rm -f "$body"; refuse "$id" brief "still has <fill: ...> placeholders: $briefp"; return; fi
     fields=" $(brief "$briefp" fields | paste -sd' ' -) "
@@ -361,7 +361,7 @@ cmd_dispatch() {
     rp="lane.$lane"
   fi
   harness=$(role_get "$rp" harness)
-  [ -n "$harness" ] || { rm -f "$body"; refuse "$id" dispatched "no $rp.harness (coord role)"; return; }
+  [ -n "$harness" ] || { rm -f "$body"; refuse "$id" dispatched "no $rp.harness (filo role)"; return; }
   mdl=$(role_get "$rp" model)
   skills=$(skills_block "$rp" "$harness") || { rm -f "$body"; refuse "$id" dispatched "$rp: no skill \"${skills#SKILL_MISSING }\" installed"; return; }
 
@@ -412,7 +412,7 @@ cmd_research() {
   tb=$(brief "$briefp" get TIMEBOX 2>/dev/null | awk '{ print $1; exit }' || true)
   if [ -n "$tb" ]; then timebox=$(dur "$tb") || { refuse "" brief "TIMEBOX \"$tb\" is not a duration (e.g. 45m)"; return; }; fi
   harness=$(role_get researcher harness)
-  [ -n "$harness" ] || { refuse "" dispatched "no researcher.harness (coord role)"; return; }
+  [ -n "$harness" ] || { refuse "" dispatched "no researcher.harness (filo role)"; return; }
   local skills
   skills=$(skills_block researcher "$harness") || { refuse "" dispatched "researcher: no skill \"${skills#SKILL_MISSING }\" installed"; return; }
   n=$(grep -cE $'\ttype=dispatched\t(.*\t)?role=researcher\t' "$LOG" 2>/dev/null || true)
@@ -450,11 +450,11 @@ shortfall() {
 # A critic's clean pass (no --note) merges on its own under autonomy=auto-merge.
 cmd_finish() {
   parse_args finish "result evidence summary slug" "ran flag note" "" "$@"
-  local slug=${F[slug]:-${COORD_OWES:-}} result=${F[result]:-} level=${F[evidence]:-} summary=${F[summary]:-}
+  local slug=${F[slug]:-${FILO_OWES:-}} result=${F[result]:-} level=${F[evidence]:-} summary=${F[summary]:-}
   local ran=${FM[ran]:-} flags=${FM[flag]:-} notes o kind id="" role="" report="" state="" conv="" r
   notes=$(sed '/^$/d' <<< "${FM[note]:-}" | paste -sd'|' - | sed 's/|/ | /g')
-  [ -n "$slug" ] && [ -n "$result" ] || { fail 2 'finish: --result and the owed slug (--slug or COORD_OWES) are required'; return; }
-  existing_events_path >/dev/null || { fail 1 'finish: no event log (set COORD_EVENTS, or run inside the repo or its worktrees)'; return; }
+  [ -n "$slug" ] && [ -n "$result" ] || { fail 2 'finish: --result and the owed slug (--slug or FILO_OWES) are required'; return; }
+  existing_events_path >/dev/null || { fail 1 'finish: no event log (set FILO_EVENTS, or run inside the repo or its worktrees)'; return; }
   o=$(model owner -v slug="$slug")
   if [ "$o" = none ]; then
     # the dispatch that owes this slug may still be recording it (it launches
@@ -590,9 +590,9 @@ merge_locked() {
   unit_row "$id" || { refuse "$id" merged "unknown unit"; return; }
   if ! { [ "$U_STATE" = approved ] || { [ "$U_STATE" = passed ] && auto_mergeable; }; }; then
     if [ "$U_STATE" = passed ]; then
-      if [ -n "$U_NOTES" ]; then refuse "$id" merged "the critic passed it with notes, so it needs the user's approval (coord approve $id)"
-      elif [ -n "$U_RISK" ]; then refuse "$id" merged "a $U_RISK unit needs the user's approval (coord approve $id)"
-      else refuse "$id" merged "needs the user's approval (coord approve $id)"; fi
+      if [ -n "$U_NOTES" ]; then refuse "$id" merged "the critic passed it with notes, so it needs the user's approval (filo approve $id)"
+      elif [ -n "$U_RISK" ]; then refuse "$id" merged "a $U_RISK unit needs the user's approval (filo approve $id)"
+      else refuse "$id" merged "needs the user's approval (filo approve $id)"; fi
       return
     fi
     refuse "$id" merged "cannot merge from $U_STATE"; return
@@ -613,7 +613,7 @@ merge_locked() {
   # whatever VERIFY leaves behind, is what merges
   identity "$REPO"
   git -C "$U_WT" add -A -- . ':(exclude).scratch' >&2 || { refuse "$id" merged "cannot stage the reviewed state in $U_WT"; return; }
-  git -C "$U_WT" -c user.email="$ID_EMAIL" -c user.name="$ID_NAME" commit -q -m "[coord] $U_GOAL" >&2 || {
+  git -C "$U_WT" -c user.email="$ID_EMAIL" -c user.name="$ID_NAME" commit -q -m "[filo] $U_GOAL" >&2 || {
     refuse "$id" merged "commit failed in $U_WT (nothing to commit?)"; return; }
   uncommit() { git -C "$U_WT" reset -q HEAD~1 || true; }
 
@@ -671,7 +671,7 @@ cmd_relay() {
   if [ "${F[detach]:-0}" = 1 ]; then   # (re)start this run's relay in the background
     local rp; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
     if alive "$rp"; then echo "RELAY pid=$rp (already running)"; return 0; fi
-    [ -s "$RUN/session" ] || { fail 1 'relay: no session for this run (coord init)'; return; }
+    [ -s "$RUN/session" ] || { fail 1 'relay: no session for this run (filo init)'; return; }
     start_relay "$(cat "$RUN/session")"; return
   fi
   local interval=${F[interval]:-${RELAY_INTERVAL:-1}} attempts=${F[max-attempts]:-${RELAY_MAX_ATTEMPTS:-5}}
@@ -763,7 +763,7 @@ progress() {
   local units ready open
   units=$(model units)
   ready=$(awk -F"$US" '$19 == 1 { print $1 }' <<< "$units" | paste -sd' ' -)
-  [ -z "$ready" ] || echo "READY $ready: for each, coord brief <id>, fill in the file it prints, then: coord dispatch <id> --role worker"
+  [ -z "$ready" ] || echo "READY $ready: for each, filo brief <id>, fill in the file it prints, then: filo dispatch <id> --role worker"
   open=$(awk -F"$US" '$2 != "merged" && $2 != "dropped"' <<< "$units" | grep -c . || true)
   [ -z "$units" ] || [ "$open" != 0 ] || echo "DONE: every unit is merged or dropped; report what shipped and stop"
 }
@@ -781,29 +781,29 @@ next_steps() {
     if [ "$unit" = - ]; then
       case "$type" in
         finished) echo "NEXT $seq: read the report; continue the shape it serves, or take the decision to the user" ;;
-        msg)      echo "NEXT $seq: act on the message; answer in your own window, never with coord msg (that wakes you again)" ;;
+        msg)      echo "NEXT $seq: act on the message; answer in your own window, never with filo msg (that wakes you again)" ;;
       esac
     fi
   done <<< "$1"
   awk '$2 != "-" { print $2 }' <<< "$1" | awk '!seen[$0]++' | while IFS= read -r unit; do
     awk -F"$US" -v id="$unit" -v auto="$auto" '$1 == id {
       s = $2
-      if (s == "built") a = "coord dispatch " id " --role critic"
+      if (s == "built") a = "filo dispatch " id " --role critic"
       else if (s == "passed" && auto && $23 == "" && $21 == "") a = "nothing: a clean pass, the engine is merging it"
-      else if (s == "passed" && $23 != "") a = "ASK THE USER to approve " id " round " $4 ", showing the critic'"'"'s notes: " $23 "; on yes: coord approve " id " && coord merge " id
-      else if (s == "passed") a = "ASK THE USER to approve " id " round " $4 " (an approval of an earlier round does not carry over); on yes: coord approve " id " && coord merge " id
-      else if (s == "approved") a = "coord merge " id
-      else if (s == "handback") a = "write a correction: coord brief " id ", fill in its CORRECTION from the reason above, then: coord dispatch " id " --role worker"
-      else if (s == "stalled" && $5 == "worker") a = "coord dispatch " id " --role worker"
-      else if (s == "stalled") a = "coord dispatch " id " --role critic"
-      else if (s == "blocked") a = "tell the user why; once fixed: coord reopen " id " --reason \"<what changed>\""
+      else if (s == "passed" && $23 != "") a = "ASK THE USER to approve " id " round " $4 ", showing the critic'"'"'s notes: " $23 "; on yes: filo approve " id " && filo merge " id
+      else if (s == "passed") a = "ASK THE USER to approve " id " round " $4 " (an approval of an earlier round does not carry over); on yes: filo approve " id " && filo merge " id
+      else if (s == "approved") a = "filo merge " id
+      else if (s == "handback") a = "write a correction: filo brief " id ", fill in its CORRECTION from the reason above, then: filo dispatch " id " --role worker"
+      else if (s == "stalled" && $5 == "worker") a = "filo dispatch " id " --role worker"
+      else if (s == "stalled") a = "filo dispatch " id " --role critic"
+      else if (s == "blocked") a = "tell the user why; once fixed: filo reopen " id " --reason \"<what changed>\""
       else a = "nothing (" s ")"
       print "NEXT " id ": " a
     }' <<< "$units"
   done
   progress
   g=$(awk -F"\t" '$2 == "open" { print $1 }' "$RUN/gates.tsv" 2>/dev/null | paste -sd" " - || true)
-  [ -z "$g" ] || echo "GATES $g open: list them together in your next report to the user (coord gate list)"
+  [ -z "$g" ] || echo "GATES $g open: list them together in your next report to the user (filo gate list)"
 }
 
 # deliver <attempts> <backoff>: resume on the batch with backoff; ack on
@@ -830,13 +830,13 @@ deliver() {
 # __BATCH__ and __SESSION__ substituted, and wait for the turn to exit.
 resume() {
   local recipe session cur i
-  recipe=${COORD_RESUME:-$(cfg_val "$CONFIG" relay.resume)}
+  recipe=${FILO_RESUME:-$(cfg_val "$CONFIG" relay.resume)}
   if [ -z "$recipe" ]; then
     cur=$(cfg_val "$ENV_CONF" current)
     [ -n "$cur" ] && recipe=$(cfg_val "$ENV_CONF" "harness.$cur.resume")
   fi
-  [ -n "$recipe" ] || { echo 'relay: no relay.resume recipe (set COORD_RESUME, config, or env.conf)' >&2; return 1; }
-  session=${COORD_SESSION:-$(cfg_val "$CONFIG" relay.session)}
+  [ -n "$recipe" ] || { echo 'relay: no relay.resume recipe (set FILO_RESUME, config, or env.conf)' >&2; return 1; }
+  session=${FILO_SESSION:-$(cfg_val "$CONFIG" relay.session)}
   [ -n "$session" ] || session=$(cat "$RUN/session" 2>/dev/null || true)
   local -a argv
   IFS='|' read -r -a argv <<< "$recipe"
@@ -900,13 +900,13 @@ cmd_done() {
 cmd_init() {
   parse_args init "answers harness session" "" "accept" "$@"
   local x=$SKILL/libexec a=()
-  COORD_CONFIG=$CONFIG "$x/detect.sh" || return
+  FILO_CONFIG=$CONFIG "$x/detect.sh" || return
   if [ ! -f "$CONFIG" ]; then
-    COORD_CONFIG=$CONFIG "$x/plan.sh" || return
-    if [ -n "${F[answers]:-}" ]; then COORD_CONFIG=$CONFIG "$x/apply.sh" --answers "${F[answers]}" || return
-    elif [ "${F[accept]:-0}" = 1 ]; then COORD_CONFIG=$CONFIG "$x/apply.sh" --accept || return
+    FILO_CONFIG=$CONFIG "$x/plan.sh" || return
+    if [ -n "${F[answers]:-}" ]; then FILO_CONFIG=$CONFIG "$x/apply.sh" --answers "${F[answers]}" || return
+    elif [ "${F[accept]:-0}" = 1 ]; then FILO_CONFIG=$CONFIG "$x/apply.sh" --accept || return
     else
-      echo 'NEXT: ASK THE USER to accept or change these (an empty model means the harness default), then: coord init --accept | coord init --answers "key=value ..."'
+      echo 'NEXT: ASK THE USER to accept or change these (an empty model means the harness default), then: filo init --accept | filo init --answers "key=value ..."'
       return 0
     fi
   fi
@@ -931,14 +931,14 @@ newest() { { find "$1" -type f -name "$2" -printf '%T@ %p\n' 2>/dev/null || true
 #   start [--harness H] [--session ID] [--no-relay]
 #     -> SESSION <id> source=<...> harness=<h> repo=<repo>  [RELAY pid=<pid>]
 # Records the harness's REAL session id (never an invented one), sets up
-# .coordinator/, and starts the relay.
+# .filo/, and starts the relay.
 cmd_start() {
   parse_args start "harness session" "" "no-relay" "$@"
   local harness=${F[harness]:-} sid=${F[session]:-} src="" f base rec pid cs
   [ -n "$harness" ] || harness=$(cfg_val "$ENV_CONF" current)
-  [ -n "$harness" ] || { fail 1 'start: no current harness (run coord detect first)'; return; }
+  [ -n "$harness" ] || { fail 1 'start: no current harness (run filo detect first)'; return; }
   if [ -n "$sid" ]; then src=user
-  elif [ -n "${COORD_SESSION:-}" ]; then sid=$COORD_SESSION src=env
+  elif [ -n "${FILO_SESSION:-}" ]; then sid=$FILO_SESSION src=env
   else
     case "$harness" in
       pi) [ -n "${PI_SESSION_ID:-}" ] && sid=$PI_SESSION_ID src=pi-env ;;
@@ -976,7 +976,7 @@ cmd_start() {
   # coordinator authors in the run
   if [ ! -f "$RUN/.gitignore" ]; then
     printf '%s\n' "$RUN_IGNORE" > "$RUN/.gitignore"
-    hygiene_commit "$REPO" "${RUN#"$REPO"/}/.gitignore" "[coord] ignore run state in .coordinator/"
+    hygiene_commit "$REPO" "${RUN#"$REPO"/}/.gitignore" "[filo] ignore run state in .filo/"
   fi
   # claude grants permissions per process and per directory: a project
   # settings file with bypassPermissions gives every claude in the repo the
@@ -987,7 +987,7 @@ cmd_start() {
   elif [ ! -e "$cs" ]; then
     mkdir -p "$(dirname "$cs")"
     printf '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  }\n}\n' > "$cs"
-    hygiene_commit "$REPO" .claude/settings.local.json "[coord] claude full permissions"
+    hygiene_commit "$REPO" .claude/settings.local.json "[filo] claude full permissions"
   fi
 
   [ "${F[no-relay]:-0}" = 1 ] && return 0
@@ -1005,7 +1005,7 @@ start_relay() {
   pid=$(
     (
       cd "$REPO" || exit 1
-      export COORD_EVENTS="$LOG" COORD_CONFIG="$CONFIG" COORD_SESSION="$1"
+      export FILO_EVENTS="$LOG" FILO_CONFIG="$CONFIG" FILO_SESSION="$1"
       exec setsid "$SELF" relay
     ) >> "$RUN/log/relay.log" 2>&1 < /dev/null &
     echo $!

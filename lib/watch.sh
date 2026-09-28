@@ -1,6 +1,6 @@
-# watch.sh: coord watch, the one command the user runs (sourced by bin/coord).
+# watch.sh: filo watch, the one command the user runs (sourced by bin/filo).
 # It reads the run's state, draws it on the terminal, redraws only the lines
-# that changed, and turns a few keys into coord commands.
+# that changed, and turns a few keys into filo commands.
 #
 # Frames are built in a small markup: \001 style \002 text \003, where style is
 # d dim, b bold, y yellow, yb bold yellow, r red, rb bold red, g green, gb bold green,
@@ -326,12 +326,12 @@ watch_frame() {
   FRAME=(); HIT=(); NEED_HIT=(); W_W=$w W_H=$h
   [ -z "$VIEW" ] || { unit_frame "$w" "$h"; return; }
   if ! watch_gather; then
-    FRAME=(" $(m b 'coord watch')" '' "   $(m d 'No run here yet. Ask your agent to coordinate some work;')" "   $(m d 'this screen follows it as soon as it starts.')")
+    FRAME=(" $(m b 'filo watch')" '' "   $(m d 'No run here yet. Ask your agent to coordinate some work;')" "   $(m d 'this screen follows it as soon as it starts.')")
     KEYS=" $(m k q) quit"; return
   fi
   watch_items
   local right; right="run $(span $((NOW - ${RUN_START:-$NOW}))) · $(printf '%(%H:%M:%S)T' "$NOW")"
-  body+=("$(lr " $(m b 'coord watch') $(m d ·) ${REPO##*/}" "$(m d "$right") " "$w")")
+  body+=("$(lr " $(m b 'filo watch') $(m d ·) ${REPO##*/}" "$(m d "$right") " "$w")")
   body+=("$(coordinator_line)")
   if [ "${#NEED[@]}" -gt 0 ]; then
     local nl=" $(m yb 'needs you')    " x c
@@ -829,7 +829,7 @@ ask() {
   [ "$W_LIVE" != 1 ] || printf '\e[?25l'; W_FULL=1
 }
 
-# run <cmd...>: a coord command, its one-line reply on the reply row
+# run <cmd...>: a filo command, its one-line reply on the reply row
 run() {
   local out
   if out=$("$SELF" "$@" 2>&1); then W_REPLY=" $(m d ›) ok: $(clean "$(head -n1 <<< "$out")")"
@@ -846,7 +846,7 @@ page() { # page <file>
 keys_page() {
   local f="$W_TMP.page"
   cat > "$f" <<'EOF'
-coord watch keys
+filo watch keys
 
 Moving
   j / k, ↓ / ↑, tab   select the next / previous item in WORK
@@ -943,9 +943,9 @@ on_key() {
     r) if [ "$kind" = unit ] && [ "${STATE[$id]}" = passed ]; then
          ask "$(m y "send $id back ›") "; [ -z "$ANSWER" ] || run reject "$id" "$ANSWER"
        fi ;;
-    o) [ "$kind" = unit ] && [ "${STATE[$id]}" = blocked ] && run reopen "$id" --reason "reopened from coord watch" ;;
+    o) [ "$kind" = unit ] && [ "${STATE[$id]}" = blocked ] && run reopen "$id" --reason "reopened from filo watch" ;;
     x) if [ "$kind" = unit ] && [ "${STATE[$id]}" = blocked ]; then
-         ask "$(m r "drop $id for good? type yes ›") "; [ "$ANSWER" != yes ] || run drop "$id" --reason "dropped from coord watch"
+         ask "$(m r "drop $id for good? type yes ›") "; [ "$ANSWER" != yes ] || run drop "$id" --reason "dropped from filo watch"
        fi ;;
     c) if [ "$kind" = gate ]; then
          run gate decide "$id" "$(awk -F'\t' -v id="$id" '$1 == id { print $5 }' "$RUN/gates.tsv")"

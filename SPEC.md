@@ -1,4 +1,4 @@
-# coordinator v2
+# filo v2
 
 Status: implemented; the migration from v1 is complete (the v1 design is in
 git history).
@@ -37,7 +37,7 @@ layer the engine enforces, in bash (see Decisions 11).
   table under one lock, so an illegal transition is refused, not recorded.
 - **Mechanical review inputs.** The engine writes the critic's brief from the
   worker brief, so the coordinator's framing never reaches the critic, and
-  `coord merge` re-runs the brief's `VERIFY` commands on the exact reviewed
+  `filo merge` re-runs the brief's `VERIFY` commands on the exact reviewed
   state before it commits.
 - **Scheduler.** The relay becomes a loop with timers: it delivers wake events,
   reports dead launches, and kills launches past their timebox.
@@ -80,7 +80,7 @@ transitions, timeouts, and retry caps are code.
 
 ### Runtime and install
 
-`bin/coord`, a bash script with subcommands: `lib/core.sh` (paths, the locked
+`bin/filo`, a bash script with subcommands: `lib/core.sh` (paths, the locked
 append, queries, launch, the state hash), `lib/cmd.sh` (the commands),
 `lib/model.awk` (the state machine), `libexec/` (cfg, detect, plan, apply).
 Runtime: bash 4.4+, coreutils, util-linux (`flock`, `setsid`), awk, git; nothing
@@ -90,27 +90,27 @@ Linux and WSL only, as in v1.
 
 ### Storage
 
-Everything a run creates lives in `<repo>/.coordinator/`:
+Everything a run creates lives in `<repo>/.filo/`:
 
 | Path | Contents | Writer |
 |---|---|---|
-| `events.log` | append-only event log, the source of truth, including delivery state | `coord` under `events.log.lock` |
-| `config.conf` | repo choices (v1 format, committed) | `coord init` |
-| `standing.md` | standing orders (committed) | `coord standing add` |
+| `events.log` | append-only event log, the source of truth, including delivery state | `filo` under `events.log.lock` |
+| `config.conf` | repo choices (v1 format, committed) | `filo init` |
+| `standing.md` | standing orders (committed) | `filo standing add` |
 | `playbooks/*.md` | repo playbook overrides (committed) | the user |
-| `.gitignore` | ignores everything here except the three above | `coord init` |
-| `session` | coordinator session id | `coord init` |
-| `gates.tsv` | gates: id, status, question, options, default, answer | `coord gate` |
-| `briefs/<id>.draft.md` | the unit's next worker brief being filled in | `coord brief` |
-| `briefs/<slug>.md`, `briefs/<slug>.brief.md` | each launch's full prompt; each worker's raw brief | `coord dispatch` |
-| `worktrees/<id>/` | the unit's worktree, branch `coord/<id>` | `coord dispatch` |
-| `log/<slug>.log`, `log/<id>.verify.log`, `log/relay.log` | launch output, merge VERIFY output, relay output | `coord` |
+| `.gitignore` | ignores everything here except the three above | `filo init` |
+| `session` | coordinator session id | `filo init` |
+| `gates.tsv` | gates: id, status, question, options, default, answer | `filo gate` |
+| `briefs/<id>.draft.md` | the unit's next worker brief being filled in | `filo brief` |
+| `briefs/<slug>.md`, `briefs/<slug>.brief.md` | each launch's full prompt; each worker's raw brief | `filo dispatch` |
+| `worktrees/<id>/` | the unit's worktree, branch `filo/<id>` | `filo dispatch` |
+| `log/<slug>.log`, `log/<id>.verify.log`, `log/relay.log` | launch output, merge VERIFY output, relay output | `filo` |
 | `batch/`, `research/` | batch files, researcher reports | relay, researchers |
-| `relay.lock`, `relay.pid` | one relay per run | `coord relay` |
+| `relay.lock`, `relay.pid` | one relay per run | `filo relay` |
 
-The log is found as `$COORD_EVENTS`, else the nearest
-`.coordinator/events.log` at or above the working directory, else
-`./.coordinator/events.log`. Dispatch passes `COORD_EVENTS` to every role,
+The log is found as `$FILO_EVENTS`, else the nearest
+`.filo/events.log` at or above the working directory, else
+`./.filo/events.log`. Dispatch passes `FILO_EVENTS` to every role,
 in its environment and in the finish-contract line; `finish` never creates a
 log it was not pointed at.
 The v1 queue, ledger, and journal are gone: all three are views of the event
@@ -128,18 +128,18 @@ replaces them with spaces). Fields (was: one JSON object each): `seq`, `ts`, `un
 
 | type | fields | written by | wakes coordinator |
 |---|---|---|---|
-| `unit_added` | `kind`, `goal`, `deps[]`, `risk` | `coord unit add` | no |
-| `dispatched` | `role`, `round`, `slug`, `pid`, `worktree`, `branch`, `harness`, `model`, `timebox_s` | `coord dispatch` | no |
-| `finished` | `slug`, `role`, `result`, `state`, `evidence`, `summary` | `coord finish` | yes |
+| `unit_added` | `kind`, `goal`, `deps[]`, `risk` | `filo unit add` | no |
+| `dispatched` | `role`, `round`, `slug`, `pid`, `worktree`, `branch`, `harness`, `model`, `timebox_s` | `filo dispatch` | no |
+| `finished` | `slug`, `role`, `result`, `state`, `evidence`, `summary` | `filo finish` | yes |
 | `converted` | `slug`, `from`, `to`, `reason` | engine (evidence below floor) | yes |
 | `died` | `slug`, `pid`, `reason` (`exited` \| `timeout`) | relay | yes |
-| `approved` / `rejected` | `text` (`by: engine` for a merge conflict) | `coord approve\|reject` (user), `coord merge` (engine) | yes |
-| `msg` | `text` | `coord msg` (user) | yes |
-| `verify_failed` | `command`, `exit`, `log`, `reason` | `coord merge` | yes |
+| `approved` / `rejected` | `text` (`by: engine` for a merge conflict) | `filo approve\|reject` (user), `filo merge` (engine) | yes |
+| `msg` | `text` | `filo msg` (user) | yes |
+| `verify_failed` | `command`, `exit`, `log`, `reason` | `filo merge` | yes |
 | `claimed` / `acked` / `nacked` | `seqs`, `batch` | the relay (delivery of wake events) | no |
-| `merged` | `sha` | `coord merge` | no |
-| `blocked` | `reason` | `coord block`, or engine (retry cap) | yes if by engine |
-| `reopened` / `dropped` | `reason` | `coord reopen\|drop` | no |
+| `merged` | `sha` | `filo merge` | no |
+| `blocked` | `reason` | `filo block`, or engine (retry cap) | yes if by engine |
+| `reopened` / `dropped` | `reason` | `filo reopen\|drop` | no |
 
 Appending is one transaction under `flock(events.lock)`: replay the log, check
 the transition, allocate `seq`, write the line, `fsync`. A refused append
@@ -183,7 +183,7 @@ The owed slug is always `<id>.r<round>.<role>` (`s1.r1.worker`,
 
 ### Playbooks
 
-`playbooks/<kind>.md` ships in the repo; `<repo>/.coordinator/playbooks/<kind>.md`
+`playbooks/<kind>.md` ships in the repo; `<repo>/.filo/playbooks/<kind>.md`
 replaces it for that repo. Header is flat `key=value` between `---` lines (the
 v1 config format, parsed the same way, never executed); the body has optional
 `## worker` and `## critic` sections appended to those roles' preambles.
@@ -220,9 +220,9 @@ briefs (critic briefs are engine-written); a researcher brief requires `GOAL`.
 ### Briefs
 
 A brief is a file of `FIELD:` sections, each starting at the beginning of a
-line and running to the next field. `coord dispatch` refuses a brief missing
+line and running to the next field. `filo dispatch` refuses a brief missing
 any field the playbook requires, printing `REFUSED <unit> brief: missing
-<FIELD…>`, and one that still holds a `<fill: …>` placeholder. `coord brief
+<FIELD…>`, and one that still holds a `<fill: …>` placeholder. `filo brief
 <id>` drafts the next one: the playbook's fields as placeholders for a first
 round, the last brief plus `CORRECTION:` for a later one; `dispatch --role
 worker` without `--brief` uses the draft and removes it once launched. `TIMEBOX:` in the brief overrides the playbook default. The launched
@@ -231,15 +231,15 @@ orders, finish contract. The finish contract is generated and last.
 
 `VERIFY:` holds commands, one per line prefixed `$ `; other lines are notes for
 the worker. A brief whose `VERIFY` has no `$ ` line is refused. These are the
-commands the worker runs, the critic runs, and `coord merge` re-runs.
+commands the worker runs, the critic runs, and `filo merge` re-runs.
 
-**Critic briefs are written by the engine.** `coord dispatch <id> --role
+**Critic briefs are written by the engine.** `filo dispatch <id> --role
 critic` takes no brief. The engine composes it from the current round's worker
 brief — `GOAL`, `SCOPE`, `ACCEPTANCE`, `VERIFY`, and `REPRO` when present —
 plus the playbook's `## critic` section and the instruction to review the
 worktree against the unit's base commit. `CONTEXT` and any other coordinator
 prose are left out: the critic sees the criteria and the code, never the
-coordinator's framing. Stored at `.coordinator/briefs/<slug>.md` for the log.
+coordinator's framing. Stored at `.filo/briefs/<slug>.md` for the log.
 
 ### Evidence
 
@@ -253,7 +253,7 @@ Levels, ordered: `none < typecheck < tests < live`.
 A critic finishes with `--evidence <level>`, one `--ran "<command>"` per
 command it ran, and optional `--flag <name>` for each `evidence.require` item
 it proved (`red-green`: a test fails at the base commit and passes at the
-reviewed state). `coord finish` computes the state hash itself in the unit's
+reviewed state). `filo finish` computes the state hash itself in the unit's
 worktree and records it; the critic no longer passes `--head`. The hash is the
 SHA-256 of `git diff --cached --binary HEAD` over a throwaway index holding the
 whole working tree (tracked changes and untracked, non-ignored files, outside
@@ -263,7 +263,7 @@ A `pass` is accepted only if the level is at or above the playbook floor, at
 least one `--ran` is given (unless the floor is `none`), and every
 `evidence.require` flag is present. Otherwise the engine records the `finished`
 event, appends `converted` with the missing item as the reason, and the unit
-moves to `handback`. A new state hash voids the evidence: `coord merge`
+moves to `handback`. A new state hash voids the evidence: `filo merge`
 recomputes the hash and refuses on drift, as in v1.
 
 The critic's evidence is attested, and the engine checks its shape. What the
@@ -272,14 +272,14 @@ itself (see Merge). A pass whose tests do not actually pass never merges.
 
 ### Merge
 
-`coord merge <id>`, in order, refusing at the first failure:
+`filo merge <id>`, in order, refusing at the first failure:
 
 1. Recorded user approval (or `autonomy=auto-merge`).
 2. The repo is on the base branch, and the worktree state hash = the recorded `state`.
 3. Stage the reviewed state and commit it with the user's identity on
-   `coord/<id>`. From here the commit, not the worktree, is what merges.
+   `filo/<id>`. From here the commit, not the worktree, is what merges.
 4. Each `$ ` command from the brief's `VERIFY`, in order, run with `bash -c` in
-   the worktree, output to `.coordinator/log/<id>.verify.log`, each bounded by
+   the worktree, output to `.filo/log/<id>.verify.log`, each bounded by
    `verify.timeout` (config, default 10m). A nonzero exit or timeout undoes the
    commit, appends `verify_failed` (the unit goes to `handback`), and prints
    `REFUSED <id> merge: verify failed: <command> (exit <n>)`.
@@ -289,7 +289,7 @@ itself (see Merge). A pass whose tests do not actually pass never merges.
    undone, and the merge refused (`verify modified reviewed files: <paths>`,
    recorded as `verify_failed`). Gitignored files, such as installed
    dependencies, are left alone throughout.
-6. Merge `coord/<id>` with `--no-ff`, then append `merged`. Publishing is a
+6. Merge `filo/<id>` with `--no-ff`, then append `merged`. Publishing is a
    separate `git push` decision. On conflict, abort the merge, undo the commit,
    and append `rejected` (by engine), returning the unit to `handback` for a
    correction round.
@@ -303,7 +303,7 @@ the same worktree; config values are still never executed.
 
 ### Scheduler (the relay)
 
-`coord relay`: one per repo, guarded by `flock` as in v1. Each tick
+`filo relay`: one per repo, guarded by `flock` as in v1. Each tick
 (`relay.interval`, default 1s):
 
 1. **Liveness.** For each `working`/`reviewing` unit whose pid is gone and whose
@@ -333,7 +333,7 @@ becomes a dependency:
   opencode subagents, pi's subagent extension): used only for short,
   read-only helpers (an arena judge, interrogation reviewers, research
   questions), whose answers return inside the coordinator's turn. Fallback:
-  `coord research`. Workers and critics always go through `coord dispatch`,
+  `filo research`. Workers and critics always go through `filo dispatch`,
   because they need a worktree, outlive the turn, and are gated by evidence
   and merge. A helper's outcome reaches the log through the command the
   coordinator acts with (a drop reason, a reject note, a correction brief).
@@ -341,7 +341,7 @@ becomes a dependency:
 ### CLI
 
 Every command prints one line (or one line per item for listings) and exits
-nonzero on failure. `coord help [<verb>]` documents each one; it is the
+nonzero on failure. `filo help [<verb>]` documents each one; it is the
 reference, so SKILL.md does not repeat flags or output formats.
 
 - Coordinator: `init`, `unit add`, `brief`, `dispatch`, `research`,
@@ -354,10 +354,10 @@ reference, so SKILL.md does not repeat flags or output formats.
 
 ### Watch
 
-`coord watch` is the only user-facing command. It reads the event log (through
+`filo watch` is the only user-facing command. It reads the event log (through
 `lib/watch.awk`, which turns events into plain sentences), `model units`,
 gates, launch logs, and the relay's pid; it never writes state except by
-running `coord` commands, whose one-line reply it shows. The screen, top to
+running `filo` commands, whose one-line reply it shows. The screen, top to
 bottom: the coordinator's line (working on a turn and what woke it, wake
 queued, last woken, or stuck), a "needs you" line only when something waits
 on the user, a red box when the relay is down while work remains, WORK (each
@@ -389,9 +389,9 @@ starts in a unit's view, and `--press` feeds it keys and mouse reports first.
 
 Each role agent (worker per lane, critic, researcher) has a harness, a model,
 and skills, under the config prefix `lane.<lane>`, `critic`, or
-`researcher`. `coord role <role> [--global] --harness --model --skill
+`researcher`. `filo role <role> [--global] --harness --model --skill
 --drop-skill` sets them; a value in the repo's `config.conf` wins over the
-user's `~/.coordinator/roles.conf` (`--global`), and an empty value counts as
+user's `~/.filo/roles.conf` (`--global`), and an empty value counts as
 unset. A model is checked against its harness where the harness can tell
 (`libexec/models.sh`: codex's model cache, `pi --list-models`, claude's
 aliases); a skill must resolve to a `SKILL.md`, the role's own harness
@@ -407,7 +407,7 @@ A batch lists its events, then what to do now:
   **current** state rather than the event, so a redelivered event never
   repeats a step: `built` → dispatch the critic; `passed` → ask the user
   (merge directly under `auto-merge`); `approved` → merge; `handback` →
-  `coord brief` for a correction, then dispatch the worker; `stalled` →
+  `filo brief` for a correction, then dispatch the worker; `stalled` →
   dispatch the same role; `blocked` → tell the user. The engine never tells
   the coordinator to approve without asking.
 - `NEXT <seq>: …` for a unit-less event (a research report, a message).
@@ -464,7 +464,7 @@ Settled on review of the draft (2026-09-27):
 
 1. **Critic briefs are engine-written** from the worker brief; the coordinator
    does not author review assignments.
-2. **`coord merge` re-runs `VERIFY`** on the reviewed state and refuses on
+2. **`filo merge` re-runs `VERIFY`** on the reviewed state and refuses on
    failure.
 3. **Every unit gets a critic.** No self-review path, including `chore`; the
    critic stays the only content reviewer.
@@ -472,16 +472,16 @@ Settled on review of the draft (2026-09-27):
 
 Made during implementation (2026-09-27):
 
-5. **One directory per run.** All run state lives in `<repo>/.coordinator/`
-   (see Storage); `$COORD_ROOT` is gone, so there is one relay per repo, not
+5. **One directory per run.** All run state lives in `<repo>/.filo/`
+   (see Storage); `$FILO_ROOT` is gone, so there is one relay per repo, not
    per machine.
 6. **The state hash ignores staging** (see Evidence); workers no longer need
    to stage, and merge stages the reviewed state itself.
 7. **Every refusal has a way forward.** `rejected` (user) and a merge conflict
    (`rejected` by engine) return the unit to `handback`, and so does a VERIFY
    that modifies the worktree (`verify_failed`).
-8. **Researchers are unit-less launches** (`coord research`): slug
-   `research.<n>`, a report path under `.coordinator/research/`, and a
+8. **Researchers are unit-less launches** (`filo research`): slug
+   `research.<n>`, a report path under `.filo/research/`, and a
    `finished` event that wakes the coordinator.
 9. **A launch the state machine refuses to record is killed.** `dispatch`
    launches, then commits the `dispatched` event; if a concurrent change makes
@@ -503,11 +503,11 @@ Made during implementation (2026-09-27):
 
 12. **The CLI carries the protocol; the skill carries judgment.** Routing,
     boot, brief fields, gates, and standing orders moved from SKILL.md into
-    `coord` (next steps in each batch, `init`, `brief`, `gate`, `standing`,
+    `filo` (next steps in each batch, `init`, `brief`, `gate`, `standing`,
     `help`), so the skill is only what the engine cannot decide. `render` was
     dropped; `status` is the view.
 
-13. **Roles are the user's, layered and checked.** `coord role` configures
+13. **Roles are the user's, layered and checked.** `filo role` configures
     each role agent's harness, model, and skills, with personal defaults under
     per-repo settings. Skills attach per role only, and reach the agent as a
     SKILL.md path in its prompt rather than through any harness's own skill
@@ -519,7 +519,7 @@ Made during implementation (2026-09-27):
     the worker's worktree, not a fresh checkout, so gitignored dependencies
     remain available to it.
 
-15. **`coord watch` is the one command for people.** Designed in Claude
+15. **`filo watch` is the one command for people.** Designed in Claude
     Design (a character-grid terminal UI, 16 colors); v0 is one column that
     fits 44 to 100 columns, redraws once a second, and opens a unit in a
     tabbed view (brief, findings, diff, log, output, history) drawn by the
