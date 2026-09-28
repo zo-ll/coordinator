@@ -69,6 +69,10 @@ bin/install.sh              # symlink this repo as <harness>/filo
 bin/install.sh --uninstall  # remove those symlinks
 ```
 
+Upgrading from coord: remove any old `<harness>/coordinator` symlinks (the
+skill is `filo` now), and move `~/.coordinator/` to `~/.filo/`. A repo's old
+`.coordinator/` is not read; set the repo up again with `filo init`.
+
 The repo root is the skill, symlinked into every harness skill dir found on
 the machine, so edits and `git pull` stay live.
 

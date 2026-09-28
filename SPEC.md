@@ -473,7 +473,7 @@ Settled on review of the draft (2026-09-27):
 Made during implementation (2026-09-27):
 
 5. **One directory per run.** All run state lives in `<repo>/.filo/`
-   (see Storage); `$FILO_ROOT` is gone, so there is one relay per repo, not
+   (see Storage); `$COORD_ROOT` (v1) is gone, so there is one relay per repo, not
    per machine.
 6. **The state hash ignores staging** (see Evidence); workers no longer need
    to stage, and merge stages the reviewed state itself.

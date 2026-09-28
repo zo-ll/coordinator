@@ -37,7 +37,7 @@ help_verb() {
     watch) cat <<'EOF'
 filo watch                                 the live view (in its own terminal)
 filo watch --once [--width N] [--height N] [--open <unit> [--tab <tab>]]
-                                            one frame on stdout, then exit
+                                           one frame on stdout, then exit
   The only command meant for people. It shows whether the coordinator is
   moving, one "needs you" line when something waits on you, and WORK: every
   unit in progress with its agent (role, round, time, liveness, latest
@@ -84,7 +84,7 @@ EOF
 filo role
   -> ROLE <role> harness=<h> model=<m> skills=<a,b>   one line per role
 filo role <role> [--global] [--harness <h>] [--model <m>]
-                  [--skill <name>]... [--drop-skill <name>]...
+                 [--skill <name>]... [--drop-skill <name>]...
   -> ROLE <role> ...   the role after the change
   Roles: worker, worker:<lane> (e.g. worker:strong), critic, researcher.
   Settings live in the repo's .filo/config.conf; --global writes your
@@ -130,7 +130,7 @@ EOF
     ;;
     finish) cat <<'EOF'
 filo finish --result <result> --summary "<one line>" [--slug <slug>]
-             [--evidence <level>] [--ran "<command>"]... [--flag <flag>]...
+            [--evidence <level>] [--ran "<command>"]... [--flag <flag>]...
   -> FINISHED <slug> -> <state> | DUP <slug>
   For role agents. Run it once, as the last thing you do: it records your
   result and wakes the coordinator. Your prompt's FINISH CONTRACT gives the
