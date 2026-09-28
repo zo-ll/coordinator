@@ -109,7 +109,7 @@ watch_gather() {
     [ -n "$line" ] || continue
     UNITS+=("$line"); id=${line%%"$US"*}
     STATE[$id]=$(cut -d"$US" -f2 <<< "$line")
-  done < <(model units)
+  done < <(model units | unc1)
   RELAY_PID=$(cat "$RUN/relay.pid" 2>/dev/null || true)
   RELAY_UP=0; alive "$RELAY_PID" && RELAY_UP=1
   UNDELIVERED=$(model undelivered | grep -c . || true)
@@ -674,7 +674,7 @@ unit_frame() {
     right="$(glyph "$U_STATE") $right "
   fi
   body+=("$(lr "$left" "$right" "$w")")
-  body+=("           $(m d "$(clean "$U_GOAL")")" '')
+  body+=("           $(m d "$(clean "$(unc1 <<< "$U_GOAL")")")" '')
   TABBAR=" " TAB_HIT=()
   for i in 1 2 3 4 5 6; do
     t=${TABS[i - 1]} pad=' ' sep=''; [ "$w" -ge 60 ] || t=${TABS_SHORT[i - 1]} pad='' sep=' '

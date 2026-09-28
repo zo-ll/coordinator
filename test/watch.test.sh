@@ -202,6 +202,8 @@ has "$(view strict --tab log)" " Merge  running"
 
 # DEL and C1 controls in event text never reach the terminal
 "$FILO" msg strict $'odd\x7f\xc2\x9b31m text\x1fend' >/dev/null
+"$FILO" unit add c1 --kind chore --goal $'goal\xc2\x9b31m here' >/dev/null
+hasnt "$(view c1)" $'\xc2\x9b'; has "$(view c1)" "goal31m here"
 out="$(frame 80)"; has "$out" "odd31m text end"; hasnt "$out" $'\xc2\x9b'; hasnt "$out" $'\x1f'
 has "$(view strict --tab history)" "odd"; hasnt "$(view strict --tab history)" $'\x7f'
 
