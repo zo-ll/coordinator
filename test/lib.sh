@@ -12,7 +12,10 @@ export GIT_CONFIG_GLOBAL=/dev/null XDG_CONFIG_HOME="$TMP/xdg"
 # never read this machine's harness state: no codex model list, no skills
 export CODEX_HOME="$TMP/codex-home" CLAUDE_CONFIG_DIR="$TMP/claude-home" FILO_ROLES="$TMP/roles.conf"
 cleanup() {
+  local f
   pkill -f -- "$TMP/" 2>/dev/null || true
+  # relays name $TMP only in their environment: stop them by their pidfiles
+  for f in "$TMP"/*/.filo/relay.pid "$TMP"/*/*/.filo/relay.pid; do [ -f "$f" ] && kill -KILL "$(cat "$f")" 2>/dev/null; done; true
   rm -rf "$TMP"
 }
 trap cleanup EXIT

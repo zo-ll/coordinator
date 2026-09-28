@@ -107,7 +107,21 @@ sleep 300 & bystander=$!
 echo "$bystander" > "$REPO/.filo/relay.pid"
 assert "$("$FILO" relay --stop)" "RELAY none running"
 kill -0 "$bystander" || { echo "  --stop killed a bystander"; exit 1; }
-kill "$bystander"; [ ! -e "$REPO/.filo/relay.pid" ] || { echo "  stale pidfile kept"; exit 1; }
+kill "$bystander"; rm "$REPO/.filo/relay.pid"
+# stop right after a start: never loses the relay (the start waits for its lock)
+echo "sess-1" > "$REPO/.filo/session"
+for i in 1 2 3 4 5; do
+  "$FILO" relay --detach >/dev/null; has "$("$FILO" relay --stop)" "STOPPED relay pid="
+done
+[ "$("$FILO" relay --stop)" = "RELAY none running" ] || { echo "  a relay survived --stop"; exit 1; }
+# a stop during an idle wait or a retry wait is prompt, and starts no new turn
+printf '#!/usr/bin/env bash\necho run >> "$TMP/fails"; exit 1\n' > "$TMP/bin/fail-resume"; chmod +x "$TMP/bin/fail-resume"
+: > "$TMP/fails"; "$FILO" msg - "retry me" >/dev/null
+FILO_RESUME="fail-resume|__BATCH__" TMP="$TMP" "$FILO" relay --interval 0.2 --backoff 20 >/dev/null 2>&1 &
+wait_for test -s "$TMP/fails"
+assert "$("$FILO" relay --stop)" "STOPPED relay pid=$!"
+assert "$(wc -l < "$TMP/fails")" 1                                          # no second attempt
+has "$("$FILO" log | tail -n1)" "nacked"                                    # the events wait for the next relay
 # stopped during a coordinator turn: the turn finishes and is acked, then the relay leaves
 printf '#!/usr/bin/env bash\nsleep 8\n' > "$TMP/bin/slow-resume"; chmod +x "$TMP/bin/slow-resume"
 "$FILO" msg - "wake up" >/dev/null

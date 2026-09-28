@@ -697,7 +697,7 @@ cmd_relay() {
     # the lock, not the pidfile, says whether a relay runs: a pidfile left by a
     # killed relay may name someone else's process by now
     local rp i; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
-    relay_running || { rm -f "$RUN/relay.pid"; echo "RELAY none running"; return 0; }
+    relay_running || { echo "RELAY none running"; return 0; }
     alive "$rp" || { fail 1 'relay: %s is held but %s names no live process' "$RUN/relay.lock" "$RUN/relay.pid"; return; }
     kill -TERM "$rp" 2>/dev/null || true
     for i in $(seq 50); do relay_running || break; sleep 0.1; done
@@ -708,7 +708,7 @@ cmd_relay() {
   fi
   if [ "${F[detach]:-0}" = 1 ]; then   # (re)start this run's relay in the background
     local rp; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
-    if alive "$rp"; then echo "RELAY pid=$rp (already running)"; return 0; fi
+    if relay_running; then echo "RELAY pid=$rp (already running)"; return 0; fi
     [ -s "$RUN/session" ] || { fail 1 'relay: no session for this run (filo init)'; return; }
     start_relay "$(cat "$RUN/session")"; return
   fi
@@ -719,7 +719,7 @@ cmd_relay() {
   GRACE=$(dur "$(cfg_val "$CONFIG" timebox.grace)" 2>/dev/null) || GRACE=30
   mkdir -p "$RUN/batch"
   exec {RELAY_LOCK}>"$RUN/relay.lock"
-  flock -n "$RELAY_LOCK" || { fail 1 'relay: another relay already holds %s; refusing to run two' "$RUN/relay.lock"; return; }
+  flock -w 1 "$RELAY_LOCK" || { fail 1 'relay: another relay already holds %s; refusing to run two' "$RUN/relay.lock"; return; }
   pidfile="$RUN/relay.pid"
   echo "$$" > "$pidfile"
   trap 'rm -f "'"$pidfile"'"' EXIT
@@ -736,7 +736,7 @@ cmd_relay() {
     reap
     BATCH="" SEQS=""
     commit claim || { fail 1 'relay: cannot claim a batch'; return; }
-    if [ -z "$BATCH" ]; then sleep "$interval"; continue; fi
+    if [ -z "$BATCH" ]; then nap "$interval"; continue; fi
     deliver "$attempts" "$backoff" || return 1
     [ "$once" = 1 ] && return 0
   done
@@ -745,6 +745,9 @@ cmd_relay() {
 
 # relay_running: this run's relay holds its lock
 relay_running() { ! flock -n "$RUN/relay.lock" true 2>/dev/null; }
+
+# nap <seconds>: sleep, but a trapped signal (relay --stop) ends it at once
+nap() { sleep "$1" & local p=$!; wait "$p" 2>/dev/null || { kill "$p" 2>/dev/null || true; }; }
 
 older() { awk -v a="$1" -v b="$2" -v c="$3" 'BEGIN { exit !(a - b > c) }'; }
 
@@ -869,7 +872,8 @@ deliver() {
       return 1
     fi
     printf 'relay: resume failed (attempt %d/%d), retrying in %ds\n' "$attempt" "$max" "$wait" >&2
-    sleep "$wait"
+    nap "$wait"
+    if [ "$RELAY_STOP" = 1 ]; then one_event type=nacked seqs="$SEQS" batch="$BATCH" || true; return 0; fi
     wait=$(( wait * 2 )); [ "$wait" -le 60 ] || wait=60
   done
 }
@@ -1057,6 +1061,8 @@ start_relay() {
     ) >> "$RUN/log/relay.log" 2>&1 < /dev/null &
     echo $!
   )
-  echo "$pid" > "$RUN/relay.pid"
+  # the relay writes its own pidfile once it holds the lock; wait for that, so
+  # nothing (relay --stop, --detach, watch) ever sees a relay half-started
+  local i; for i in $(seq 40); do if relay_running || ! alive "$pid"; then break; fi; sleep 0.05; done
   echo "RELAY pid=$pid"
 }
