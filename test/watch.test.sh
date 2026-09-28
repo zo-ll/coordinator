@@ -66,7 +66,7 @@ has "$(frame 80 --press "$(click 3 "$((r + 1))")")" "▸◐ busy1"              
 hasnt "$(frame 80 --press "$(click 3 "$r" 0 | tr M m)")" "▸◐ busy1"         # a release does nothing
 hasnt "$(frame 80 --press "$(click 3 "$r" 2)")" "▸◐ busy1"                  # nor another button
 has "$(frame 80 --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")")" "o reopen  x drop"
-has "$(PAGER='head -n1' frame 80 --press "$(click 3 "$r")$(click 3 "$r")")" "== busy1 · feature · working"  # again opens
+has "$(frame 80 --press "$(click 3 "$r")$(click 3 "$r")")" "◐ busy1 · feature · round 1"  # again opens
 has "$(PAGER='head -n1' frame 80 --press "$(click "$(col_of "$bar" '? keys')" 70)")" "coord watch keys"
 has "$(frame 80 --press "$(click 3 "$r" 65)$(click 3 "$r" 65)")" "▸◐ busy1"  # wheel moves the selection
 has "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)")" "↑ 1 newer" # and scrolls the feed
@@ -87,6 +87,39 @@ has "$("$COORD" log)" "msg - hi there"
 # a click never skips drop's typed confirmation
 has "$( { click 65 69; } | frame 80 --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")x")" "x drop"
 assert "$(state_of dead1)" blocked
+
+# the unit view: ↵ opens the selected unit on its brief, in six tabs
+out="$(frame 80 --press $'\n')"
+has "$out" "▲ pass1 · feature · round 1 · passed · needs your approval"
+has "$out" "1 brief  2 findings  3 diff  4 log  5 output  6 history"
+has "$out" "written by the coordinator"
+has "$out" "GOAL: file.txt gains a line"
+has "$out" "a approve  r reject  1-6 tab"
+view() { "$COORD" watch --once --width 80 --height "${H:-70}" --open "$@"; }
+out="$(view pass1 --tab findings)"; has "$out" "round 1 · pass · evidence tests"; has "$out" '$ test -f file.txt'
+out="$(view pass1 --tab diff)"; has "$out" "file.txt  +1 −0"; has "$out" "+change by pass1.r1.worker"
+has "$(view pass1 --tab log)" "the merge's checks haven't run"
+has "$(view pass1 --tab output)" "pass1.r1.critic.log"                       # the newest round first
+has "$(view pass1 --tab output --press '[')" "pass1.r1.worker.log"           # [ ] switch rounds
+out="$(view pass1 --tab history)"; has "$out" "unit_added pass1"; has "$out" "finished pass1 pass1.r1.critic pass"
+has "$(view pass1 --press 3)" "─ diff ─"                                   # 1-6 pick a tab
+has "$(view pass1 --press $'\e[C')" "─ findings ─"                          # → next
+has "$(view pass1 --press $'\e[D')" "─ history ─"                           # ← previous, wrapping
+has "$(view pass1 --press $'\e')" "─ WORK "                                  # esc: back to the main screen
+has "$(PAGER='head -n1' view pass1 --press p)" "written by the coordinator"    # p: the tab in $PAGER
+# a running agent's output follows its tail until you scroll up
+for i in $(seq -w 1 50); do echo "line $i"; done >> .coordinator/log/busy1.r1.worker.log
+has "$(H=14 view busy1 --tab output)" "line 50"
+hasnt "$(H=14 view busy1 --tab output --press k)" "line 50"
+has "$(H=14 view busy1 --tab output --press k)" "of 51"
+# mouse: a tab name switches, the wheel scrolls, a unit in done opens its view
+bar=$(sed -n 2p <<< "$(view pass1)")
+has "$(view pass1 --press "$(click "$(col_of "$bar" diff)" 2)")" "─ diff ─"
+hasnt "$(H=14 view busy1 --tab output --press "$(click 3 8 64)")" "line 50"
+done_line=$(frame 80 | grep -F 'done     ')
+out="$(frame 80 --press "$(click "$(col_of "$done_line" done1)" "$(row_of 'done     ')")")"
+has "$out" "✓ done1 · chore · round 1 · merged"
+has "$(view done1 --tab diff)" "+change by done1.r1.worker"                   # a merged unit: its merge commit
 
 # keys: approve the selected passed unit -> approved and merged
 has "$(frame 80 --press a)" "› ok: MERGED pass1"
@@ -112,5 +145,14 @@ FAKE_CRITIC=notepass "$COORD" dispatch noted --role critic >/dev/null; wait_for 
 out="$(frame 80)"
 has "$out" "▲ noted  passed with notes · needs you"
 has "$out" "notes: check the migration"
+
+# the merge's checks failed: the view opens on their log
+sed 's/-gt 1/-gt 99/' "$TMP/brief" > "$TMP/strict"
+"$COORD" unit add strict --kind chore --goal strict >/dev/null
+"$COORD" dispatch strict --role worker --brief "$TMP/strict" >/dev/null; wait_for is_state strict built
+FAKE_CRITIC=notepass "$COORD" dispatch strict --role critic >/dev/null; wait_for is_state strict passed
+"$COORD" approve strict >/dev/null; "$COORD" merge strict >/dev/null 2>&1 || true
+assert "$(state_of strict)" handback
+out="$(view strict)"; has "$out" "─ log ─"; has "$out" "-gt 99"
 
 echo "  watch ok"

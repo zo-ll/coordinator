@@ -36,7 +36,8 @@ help_verb() {
   case "$1" in
     watch) cat <<'EOF'
 coord watch                                 the live view (in its own terminal)
-coord watch --once [--width N] [--height N] one frame on stdout, then exit
+coord watch --once [--width N] [--height N] [--open <unit> [--tab <tab>]]
+                                            one frame on stdout, then exit
   The only command meant for people. It shows whether the coordinator is
   moving, one "needs you" line when something waits on you, and WORK: every
   unit in progress with its agent (role, round, time, liveness, latest
@@ -44,7 +45,8 @@ coord watch --once [--width N] [--height N] one frame on stdout, then exit
   open decisions and research reports; then up next, done, and recent events.
   It redraws once a second. j/k (or arrows, tab) select an item and keys act
   on it: a approve (and merge), r reject with a note, o/x reopen/drop, c/d
-  confirm/change a decision, v read a report, ↵ open in $PAGER; m messages
+  confirm/change a decision, v read a report, ↵ open a unit (tabs: brief,
+  findings, diff, log, output, history; 1-6 or ←/→, esc back); m messages
   the coordinator, w restarts a stopped wake process, ? keys, q quits (the
   run keeps going). The mouse works too: click selects (again opens), a
   "needs you" entry jumps to its item, a key in the bar presses it, the

@@ -19,8 +19,9 @@ work in progress (each unit's agent and its latest output, branch, worktree
 and changed files), what needs you, and what just happened. Clean critic
 passes merge on their own; a pass with notes, a risky unit, a blocked unit, or
 an open decision needs you. Select with j/k: `a` approves and merges, `r`
-sends back with a note, `m` messages the coordinator, `↵` opens a unit in your
-pager, `?` lists the rest. The mouse works too: click to select and open,
+sends back with a note, `m` messages the coordinator, `↵` opens a unit (its
+brief, the critic's findings, the diff, the merge's checks, the agent's
+output, its history), `?` lists the rest. The mouse works too: click to select and open,
 click a key to press it, scroll the feed.
 
 ## How it works

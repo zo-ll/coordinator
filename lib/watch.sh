@@ -4,7 +4,7 @@
 #
 # Frames are built in a small markup: \001 style \002 text \003, where style is
 # d dim, b bold, y yellow, yb bold yellow, r red, rb bold red, g green, gb bold green,
-# c cyan, k key (bold cyan), I inverse. fit() cuts a line to the width and
+# c cyan, k key (bold cyan), I inverse, u a unit you can click (dim). fit() cuts a line to the width and
 # ansi() turns it into escapes (or plain text under NO_COLOR / no terminal).
 
 shopt -s extglob
@@ -37,8 +37,8 @@ fit() {
 ansi() {
   local s=$1 k c
   if [ "$W_COLOR" != 1 ]; then s=${s//$W_SO+([a-zA-Z])$W_SM/}; printf '%s' "${s//$W_SE/}"; return; fi
-  for k in yb rb gb d b y r g c k I; do
-    case $k in d) c=2 ;; b) c=1 ;; y) c=33 ;; yb) c='1;33' ;; r) c=31 ;; rb) c='1;31' ;;
+  for k in yb rb gb d b y r g c k I u; do
+    case $k in d|u) c=2 ;; b) c=1 ;; y) c=33 ;; yb) c='1;33' ;; r) c=31 ;; rb) c='1;31' ;;
                g) c=32 ;; gb) c='1;32' ;; c) c=36 ;; k) c='1;36' ;; I) c=7 ;; esac
     s=${s//"$W_SO$k$W_SM"/$'\e['"${c}m"}
   done
@@ -289,16 +289,16 @@ item_lines() {
   esac
 }
 
-queue_lines() { # up next and done, one line each
+queue_lines() { # up next and done, one line each; unit names are u (click opens)
   local row id st next="" done_=""
   for row in "${UNITS[@]}"; do
     IFS=$US read -r id st _ <<< "$row"
     case $st in
-      todo) next+="  ○ $id$( [ "$(sentence "$row")" = 'ready to start' ] || printf ', %s' "$(sentence "$row")")" ;;
-      merged|dropped) done_+="  $(glyph "$st") $id" ;;
+      todo) next+="$(m d '  ○ ')$(m u "$id")$( [ "$(sentence "$row")" = 'ready to start' ] || m d ", $(sentence "$row")")" ;;
+      merged|dropped) done_+="  $(glyph "$st") $(m u "$id")" ;;
     esac
   done
-  [ -z "$next" ] || echo "$(m d "   up next$next")"
+  [ -z "$next" ] || echo "$(m d '   up next')$next"
   [ -z "$done_" ] || echo "$(m d "   done   ")$done_"
 }
 
@@ -318,11 +318,13 @@ coordinator_line() {
 }
 
 # watch_frame <width> <height>: FRAME (body lines), KEYS, and the click map
-# taken from the same lines: HIT[row] ("item <i>", need, work, feed) and
-# NEED_HIT ("from to item" per "needs you" entry)
+# taken from the same lines: HIT[row] ("item <i>", need, work, queue, feed)
+# and NEED_HIT ("from to item" per "needs you" entry). With a unit open
+# (VIEW), the unit view instead.
 watch_frame() {
   local w=$1 h=$2 body=() l i n row st
   FRAME=(); HIT=(); NEED_HIT=(); W_W=$w W_H=$h
+  [ -z "$VIEW" ] || { unit_frame "$w" "$h"; return; }
   if ! watch_gather; then
     FRAME=(" $(m b 'coord watch')" '' "   $(m d 'No run here yet. Ask your agent to coordinate some work;')" "   $(m d 'this screen follows it as soon as it starts.')")
     KEYS=" $(m k q) quit"; return
@@ -372,7 +374,9 @@ watch_frame() {
       done
     elif [ "${#UNITS[@]}" -eq 0 ]; then body+=("$(m d '   nothing yet: the coordinator is still planning')")
     else body+=("$(m d '   nothing in progress')"); fi
-    mapfile -t -O "${#body[@]}" body < <(queue_lines)
+    n=${#body[@]}
+    mapfile -t -O "$n" body < <(queue_lines)
+    while [ "$n" -lt "${#body[@]}" ]; do HIT[n++]=queue; done
     body+=('')
   fi
   # the feed, newest first, FEED_OFF entries scrolled back by the wheel
@@ -388,6 +392,164 @@ watch_frame() {
   [ "${#ITEMS[@]}" -lt 2 ] || pk+="$(m k j/k) move  "
   [ "$STUCK" = 0 ] || pk+="$(m k w) restart wake  "
   KEYS=" $pk$(m k ↵) open  $(m k m) message  $(m k '?') keys  $(m k q) quit"
+}
+
+# ---------------------------------------------------------------- unit view
+
+# One unit, full screen, in six tabs. VIEW is the open unit, TAB the tab
+# (1-6), TSCROLL the first line shown, TFOLLOW 1 while the output tab sticks
+# to the tail, OUT_IX which round's output (-1 the newest).
+TABS=(brief findings diff log output history)
+
+# plain: untrusted text as lines: no escapes, tabs expanded, no control bytes
+plain() { sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | expand -t 4 | tr -d '\000-\010\013-\037\177'; }
+
+# out_logs <id>: the unit's agent output files, oldest first
+out_logs() { ls -tr "$RUN/log/$1".r*.*.log 2>/dev/null || true; }
+
+# findings <id>: the critic's rounds, newest first; earlier ones collapse to
+# their outcome
+findings() {
+  awk -F'\t' -v id="$1" '
+    function q(s) { gsub(/[\001-\037]/, " ", s); return s }
+    function m(k, t) { return "\001" k "\002" t "\003" }
+    $NF != "." { next }
+    { delete E; ran = ""
+      for (i = 1; i < NF; i++) { p = index($i, "="); k = substr($i, 1, p - 1); v = q(substr($i, p + 1))
+        if (k == "ran") ran = ran "\n" v; else E[k] = v } }
+    E["unit"] != id { next }
+    E["type"] == "dispatched" && E["role"] == "critic" { R[++n] = E["round"]; RES[n] = "reviewing"; next }
+    E["type"] == "finished" && E["role"] == "critic" { RES[n] = E["result"]; LV[n] = E["level"]; SUM[n] = E["summary"]; NOTE[n] = E["notes"]; RAN[n] = ran; next }
+    E["type"] == "converted" && n { RES[n] = "handback"; CONV[n] = E["reason"] }
+    E["type"] == "died" && E["slug"] ~ /critic$/ && n { RES[n] = "died" }
+    END {
+      if (!n) { print m("d", "no review yet"); exit }
+      for (i = n; i >= 1; i--) {
+        head = "round " R[i] " · " RES[i] (LV[i] == "" ? "" : " · evidence " LV[i])
+        if (i < n) { print m("d", head (SUM[i] == "" ? "" : " · " SUM[i])); continue }
+        print m("b", head)
+        if (SUM[i] != "") print "  " SUM[i]
+        if (NOTE[i] != "") print m("y", "  notes: " NOTE[i])
+        if (CONV[i] != "") print m("y", "  converted to a handback: " CONV[i])
+        if (RAN[i] != "") { print ""; print m("d", "  ran:"); k = split(substr(RAN[i], 2), c, "\n"); for (j = 1; j <= k; j++) print "    $ " c[j] }
+        if (n > 1) print ""
+      }
+    }' "$LOG"
+}
+
+# diff_tab <id>: a file summary, then the diff (a merged unit: its merge commit)
+diff_tab() {
+  local f add del new files=0
+  if [ "$U_STATE" = merged ] && [ -n "$U_SHA" ]; then
+    set -- git -C "$REPO" diff "$U_SHA^1" "$U_SHA"
+  elif [ -d "$U_WT" ]; then
+    set -- git -C "$U_WT" diff HEAD
+  else
+    m d 'no changes: no worktree yet'; echo; return 0
+  fi
+  while IFS=$'\t' read -r add del f; do
+    [ -n "$f" ] || continue; files=$((files + 1))
+    echo "  $(m b "$(clean "$f")")  $(m g "+$add") $(m r "−$del")"
+  done < <("$@" --numstat 2>/dev/null || true)
+  new=""
+  [ "$U_STATE" = merged ] || new=$(git -C "$U_WT" ls-files --others --exclude-standard 2>/dev/null || true)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue; files=$((files + 1))
+    echo "  $(m b "$(clean "$f")")  $(m g "+$(wc -l < "$U_WT/$f" 2>/dev/null || echo 0)") $(m d new)"
+  done <<< "$new"
+  [ "$files" -gt 0 ] || { m d 'no changes yet'; echo; return 0; }
+  echo
+  { "$@" 2>/dev/null || true
+    while IFS= read -r f; do [ -z "$f" ] || git -C "$U_WT" diff --no-index /dev/null "$f" 2>/dev/null || true; done <<< "$new"
+  } | plain | sed $'s/^diff --git .*/\001b\002&\003/; t; s/^+.*/\001g\002&\003/; t; s/^-.*/\001r\002&\003/'
+}
+
+# tab_body <tab>: the tab's lines, as markup
+tab_body() {
+  local id=$VIEW l
+  case $1 in
+    1) echo "$(m d "written by the coordinator · $(date -r "$U_BRIEF" '+%Y-%m-%d %H:%M' 2>/dev/null || echo 'no brief yet')")"; echo
+       [ ! -f "$U_BRIEF" ] || plain < "$U_BRIEF" ;;
+    2) findings "$id" ;;
+    3) diff_tab "$id" ;;
+    4) if [ -f "$RUN/log/$id.verify.log" ]; then plain < "$RUN/log/$id.verify.log"
+       else m d "the merge's checks haven't run"; echo; fi ;;
+    5) mapfile -t OUTS < <(out_logs "$id")
+       if [ "${#OUTS[@]}" -eq 0 ]; then m d 'no output yet'; echo; return 0; fi
+       [ "$OUT_IX" -ge 0 ] && [ "$OUT_IX" -lt "${#OUTS[@]}" ] || OUT_IX=$(( ${#OUTS[@]} - 1 ))
+       plain < "${OUTS[OUT_IX]}" ;;
+    6) cmd_log "$id" | plain ;;
+  esac
+}
+
+# open_unit <id>: open the unit view on its brief, or on its merge checks'
+# log when they failed
+open_unit() {
+  unit_row "$1" || { W_REPLY=" $(m r ✗) no unit \"$(clean "$1")\""; return 1; }
+  VIEW=$1 TAB=1 TSCROLL=0 TFOLLOW=1 OUT_IX=-1 W_REPLY=""
+  [[ ${REASON[$1]:-} != "the merge's checks failed"* ]] || [ "$U_STATE" = merged ] || TAB=4
+}
+set_tab() { TAB=$1 TSCROLL=0 TFOLLOW=1; }
+scroll() { TSCROLL=$((TSCROLL + $1)); [ "$TSCROLL" -ge 0 ] || TSCROLL=0; TFOLLOW=0; }
+
+# unit_frame <width> <height>: the open unit: header, tabs, the tab's lines
+unit_frame() {
+  local w=$1 h=$2 id=$VIEW row="" i t total rows max body=() f="$RUN/watch.tab" right
+  watch_gather || true
+  unit_row "$id" || { VIEW=""; watch_frame "$w" "$h"; return; }
+  for row in "${UNITS[@]}"; do [ "${row%%"$US"*}" = "$id" ] && break; done
+  body+=("$(lr " $(glyph "$U_STATE") $(m b "$id") $(m d "· $U_KIND · round $U_ROUND ·") $(sentence "$row")" "$(m d "$(printf '%(%H:%M:%S)T' "$NOW")") " "$w")")
+  TABBAR=" "
+  for i in 1 2 3 4 5 6; do
+    t=${TABS[i - 1]}
+    if [ "$i" = "$TAB" ]; then TABBAR+="$(m k "$i")$(m I " $t ") "; else TABBAR+="$(m k "$i") $t  "; fi
+  done
+  HIT[1]=tabs; body+=("$TABBAR")
+  tab_body "$TAB" > "$f"
+  total=$(wc -l < "$f"); rows=$(( h - 3 - ${#body[@]} - 1 )); VIEW_ROWS=$rows
+  max=$(( total > rows ? total - rows : 0 ))
+  # the output of a running agent follows its tail until you scroll up
+  if [ "$TAB" = 5 ] && [ -n "$U_OWES" ] && [ "$TFOLLOW" = 1 ]; then TSCROLL=$max; fi
+  [ "$TSCROLL" -le "$max" ] || TSCROLL=$max
+  [ "$TSCROLL" -lt "$max" ] || [ "$TAB" != 5 ] || TFOLLOW=1
+  right=""
+  [ "$TAB" != 5 ] || [ "${#OUTS[@]}" -eq 0 ] || right="${OUTS[OUT_IX]##*/} · "
+  [ "$total" -le "$rows" ] || right+="$((TSCROLL + 1))–$((TSCROLL + rows < total ? TSCROLL + rows : total)) of $total"
+  right=${right% · }
+  body+=("$(rule "${TABS[TAB - 1]}" "${right:+$(m d "$right")}" "$w")")
+  while IFS= read -r t; do HIT[${#body[@]}]=tab; body+=(" $t"); done < <(sed -n "$((TSCROLL + 1)),$((TSCROLL + rows))p" "$f")
+  FRAME=("${body[@]:0:$((h - 3))}")
+  local pk=""
+  [ "$U_STATE" != passed ] || pk="$(m k a) approve  $(m k r) reject  "
+  [ "$TAB" != 3 ] || pk+="$(m k n/N) file  "
+  [ "$TAB" != 5 ] || pk+="$(m k '[/]') round  "
+  KEYS=" $pk$(m k 1-6) tab  $(m k j/k) scroll  $(m k p) pager  $(m k esc) back  $(m k q) quit"
+}
+
+# view_key <key>: the unit view's own keys
+view_key() {
+  local l
+  case $1 in
+    [1-6]) set_tab "$1" ;;
+    RIGHT) set_tab $(( TAB % 6 + 1 )) ;;
+    LEFT)  set_tab $(( (TAB + 4) % 6 + 1 )) ;;
+    j|DOWN) scroll 1 ;;
+    k|UP)   scroll -1 ;;
+    ' ')    scroll "$(( ${VIEW_ROWS:-20} - 1 ))" ;;
+    n|N) [ "$TAB" = 3 ] || return 0
+         if [ "$1" = n ]; then l=$(grep -n $'^\001b\002diff --git' "$RUN/watch.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 > s { print; exit }')
+         else l=$(grep -n $'^\001b\002diff --git' "$RUN/watch.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 < s { l = $1 } END { print l }'); fi
+         [ -z "$l" ] || { TSCROLL=$((l - 1)) TFOLLOW=0; } ;;
+    '['|']') [ "$TAB" = 5 ] || return 0
+         mapfile -t OUTS < <(out_logs "$VIEW")
+         [ "$OUT_IX" -ge 0 ] || OUT_IX=$(( ${#OUTS[@]} - 1 ))
+         if [ "$1" = '[' ]; then [ "$OUT_IX" -le 0 ] || OUT_IX=$((OUT_IX - 1))
+         else [ "$OUT_IX" -ge $(( ${#OUTS[@]} - 1 )) ] || OUT_IX=$((OUT_IX + 1)); fi
+         TSCROLL=0 TFOLLOW=1 ;;
+    p) sed $'s/\001[a-zA-Z]*\002//g; s/\003//g' "$RUN/watch.tab" > "$RUN/watch.page"; page "$RUN/watch.page" ;;
+    ESC) VIEW="" W_REPLY="" ;;
+  esac
+  return 0
 }
 
 # ---------------------------------------------------------------- terminal
@@ -417,7 +579,7 @@ draw() {
 }
 
 # read_key <fd> [timeout]: one key -> KEY: a character ("" is ↵), UP, DOWN,
-# ESC, M:<b>;<x>;<y><M|m> for an SGR mouse report, or NONE for any other
+# LEFT, RIGHT, ESC, M:<b>;<x>;<y><M|m> for an SGR mouse report, or NONE for any other
 # escape sequence (read whole, so its tail isn't taken for keys)
 read_key() {
   local c s="" t=()
@@ -433,7 +595,7 @@ read_key() {
   # read them here, or they would land as keys (wheel-down is "a")
   # (as bytes: past column 162 one reads as the start of a UTF-8 character)
   [ "$s" != M ] || LC_ALL=C IFS= read -rsn3 -u "$1" -t 0.01 c || true
-  case $s in A) KEY=UP ;; B) KEY=DOWN ;; '<'*[Mm]) KEY="M:${s#<}" ;; *) KEY=NONE ;; esac
+  case $s in A) KEY=UP ;; B) KEY=DOWN ;; C) KEY=RIGHT ;; D) KEY=LEFT ;; '<'*[Mm]) KEY="M:${s#<}" ;; *) KEY=NONE ;; esac
 }
 
 # drain: drop input queued while a slow action ran (a second click, a key
@@ -496,30 +658,6 @@ page() { # page <file>
   term_on
 }
 
-unit_page() { # unit_page <id> -> a file with everything about one unit
-  local id=$1 f="$RUN/watch.page" l
-  unit_row "$id" || { W_REPLY=" $(m r ✗) no unit \"$(clean "$id")\""; return 1; }
-  {
-    echo "== $id · $U_KIND · $U_STATE · round $U_ROUND"
-    echo "$U_GOAL"; echo
-    echo "== brief"; cat "$U_BRIEF" 2>/dev/null || echo "(none yet)"; echo
-    if [ -n "${CRITIC[$id]:-}" ]; then
-      local cr cl cs; IFS=$'\t' read -r cr cl cs <<< "${CRITIC[$id]}"
-      echo "== critic passed round $cr · evidence: ${cl:-none}"; echo "$cs"; echo
-    fi
-    echo "== changes"
-    if [ "$U_STATE" = merged ] && [ -n "$U_SHA" ]; then git -C "$REPO" diff --stat -p "$U_SHA^1" "$U_SHA"
-    elif [ -d "$U_WT" ]; then
-      git -C "$U_WT" diff --stat -p HEAD
-      git -C "$U_WT" ls-files --others --exclude-standard | sed 's/^/new file: /'
-    fi; echo
-    [ ! -f "$RUN/log/$id.verify.log" ] || { echo "== the merge's checks"; cat "$RUN/log/$id.verify.log"; echo; }
-    for l in "$RUN/log/$id".r*.*.log; do [ -f "$l" ] && { echo "== output: ${l##*/}"; tail -n 200 "$l" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g'; echo; }; done
-    echo "== history"; cmd_log "$id"
-  } > "$f" 2>&1
-  page "$f"
-}
-
 keys_page() {
   local f="$RUN/watch.page"
   cat > "$f" <<'EOF'
@@ -534,9 +672,19 @@ On the ▸ selected item
   o / x   reopen / drop a blocked unit (drop asks first; it is final)
   c / d   confirm / change an open decision
   v       read a research report
-  ↵       open it: a unit's brief, critic, changes, checks, output and
-          history; a report; a researcher's output. With nothing
-          selected, asks which unit.
+  ↵       open it: a unit in its own view (below); a report; a
+          researcher's output. With nothing selected, asks which unit.
+
+In a unit's view
+  1-6, ← / →   the tab: brief, findings, diff, log (the merge's checks),
+               output, history
+  j / k, space scroll; the output of a running agent follows its tail
+               until you scroll up
+  n / N        next / previous file in the diff
+  [ / ]        an earlier / later round's output
+  p            this tab in $PAGER
+  esc          back to the main screen
+  a / r        approve / reject, when the unit passed
 
 Anywhere
   m       send the coordinator a message
@@ -546,8 +694,10 @@ Anywhere
 
 Mouse
   click an item to select it, the selected one again to open it; click a
-  "needs you" entry to jump to it, a key in the bottom bar to press it.
-  The wheel moves the selection over WORK and scrolls RECENT back.
+  "needs you" entry to jump to it, a unit in up next or done to open it,
+  a key in the bottom bar to press it. The wheel moves the selection over
+  WORK and scrolls RECENT back. In a unit's view, click a tab to show it;
+  the wheel scrolls it.
   In a prompt: ↵ or ✓ send sends, esc or ✗ cancel cancels. Shift-drag
   selects text in most terminals while watch has the mouse.
 
@@ -560,19 +710,25 @@ EOF
 
 # on_mouse <M:...>: a click or wheel turn, hit-tested against the last frame.
 # Click an item to select it, the selected one to open it, a "needs you"
-# entry to select its item, a key in the bar to press it; the wheel moves
-# the selection over WORK and scrolls RECENT.
+# entry to select its item, a unit in up next or done to open it, a key in
+# the bar to press it; the wheel moves the selection over WORK and scrolls
+# RECENT. In the unit view: click a tab to show it, the wheel scrolls it.
 on_mouse() {
   local k i hit=()
   mouse "$1" || return 0
   if [ "$MY" = "$W_H" ]; then
     mapfile -t hit < <(hits "$KEYS" k)
     [ "$MB" = 0 ] && k=$(at "$MX" "${hit[@]}") || return 0
-    case $k in j/k) return 0 ;; ↵) k='' ;; esac
+    case $k in j/k|1-6|n/N|'[/]') return 0 ;; ↵) k='' ;; esac
+    [ "$k" != esc ] || k=ESC
     on_key "$k"; return
   fi
   [ "$MY" -le "${#FRAME[@]}" ] || return 0
   case $MB:${HIT[MY - 1]:-} in
+    0:tabs) mapfile -t hit < <(hits "$TABBAR" k); k=$(at "$MX" "${hit[@]}") && set_tab "$k" ;;
+    64:tab) scroll -3 ;;
+    65:tab) scroll 3 ;;
+    0:queue) mapfile -t hit < <(hits "${FRAME[MY - 1]}" u); k=$(at "$MX" "${hit[@]}") && open_unit "$k" ;;
     0:item*) i=${HIT[MY - 1]#item }; if [ "$i" = "$SEL" ]; then on_key ''; else SEL=$i; fi ;;
     0:need) i=$(at "$MX" "${NEED_HIT[@]}") && SEL=$i ;;
     64:item*|64:work) [ "$SEL" -eq 0 ] || SEL=$((SEL - 1)) ;;
@@ -586,6 +742,10 @@ on_mouse() {
 on_key() {
   local key=$1 item="" kind="" id=""
   if [ "${#ITEMS[@]}" -gt 0 ]; then item=${ITEMS[$SEL]}; kind=${item%%$'\t'*}; id=${item#*$'\t'}; fi
+  if [ -n "$VIEW" ]; then   # the unit view: a, r, m, w, ?, q and the mouse act as on the main screen
+    kind=unit id=$VIEW
+    case $key in a|r|m|w|'?'|q|M:*) ;; *) view_key "$key"; return 0 ;; esac
+  fi
   case $key in
     q) return 1 ;;
     j|$'\t'|DOWN) [ "${#ITEMS[@]}" -eq 0 ] || SEL=$(( (SEL + 1) % ${#ITEMS[@]} )) ;;
@@ -613,23 +773,27 @@ on_key() {
     '?') keys_page ;;
     M:*) on_mouse "$key"; return ;;
     '') case $kind in
-          unit) unit_page "$id" ;;
+          unit) open_unit "$id" ;;
           report) echo "$id" >> "$RUN/watch.read"; page "$(cut -f1 <<< "${REPORT[$id]}")" ;;
           research) page "$RUN/log/$id.log" ;;
-          *) ask "$(m c 'open unit ›') "; [ -z "$ANSWER" ] || unit_page "$ANSWER" ;;
+          *) ask "$(m c 'open unit ›') "; [ -z "$ANSWER" ] || open_unit "$ANSWER" ;;
         esac ;;
   esac
   return 0
 }
 
-#   watch [--once] [--width N] [--height N]
+#   watch [--once] [--width N] [--height N] [--open <unit> [--tab <tab>]] [--press <keys>]
 cmd_watch() {
-  parse_args watch "width height press" "" "once" "$@"
-  SEL=0 W_LIVE=0 FEED_OFF=0
+  parse_args watch "width height press open tab" "" "once" "$@"
+  SEL=0 W_LIVE=0 FEED_OFF=0 VIEW="" TAB=1
   W_COLOR=0; { [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; } && W_COLOR=1
   if [ "${F[once]:-0}" = 1 ] || [ ! -t 0 ] || [ ! -t 1 ]; then
     local w=${F[width]:-$(tput cols 2>/dev/null || echo 80)} h=${F[height]:-40} l
     [ "$w" -ge 44 ] || w=44
+    if [ -n "${F[open]:-}" ]; then   # --open: start in a unit's view, on --tab (a name or 1-6)
+      watch_gather || true; open_unit "${F[open]}" || { echo "watch: no unit \"${F[open]}\"" >&2; return 1; }
+      local t; for t in 1 2 3 4 5 6; do case ${F[tab]:-} in "$t"|"${TABS[t - 1]}") set_tab "$t" ;; esac; done
+    fi
     local pfd   # --press: keys (and mouse reports) to act on first (tests)
     exec {pfd}< <(printf '%s' "${F[press]:-}")
     while read_key "$pfd"; do watch_frame "$w" "$h"; on_key "$KEY" || break; done
