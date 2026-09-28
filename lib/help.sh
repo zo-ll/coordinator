@@ -46,7 +46,10 @@ coord watch --once [--width N] [--height N] one frame on stdout, then exit
   on it: a approve (and merge), r reject with a note, o/x reopen/drop, c/d
   confirm/change a decision, v read a report, ↵ open in $PAGER; m messages
   the coordinator, w restarts a stopped wake process, ? keys, q quits (the
-  run keeps going). NO_COLOR turns colors off.
+  run keeps going). The mouse works too: click selects (again opens), a
+  "needs you" entry jumps to its item, a key in the bar presses it, the
+  wheel moves the selection or scrolls the feed; shift-drag selects text.
+  NO_COLOR turns colors off.
 EOF
     ;;
     init) cat <<'EOF'

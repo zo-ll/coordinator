@@ -54,6 +54,32 @@ has "$out" "a approve  r reject  j/k move"                            # keys fol
 # every line fits the width
 [ "$(frame 44 | awk '{ print length($0) }' | sort -n | tail -1)" -le 44 ] || { echo "  wider than 44"; exit 1; }
 
+# mouse: SGR reports hit-tested against the frame (rows as printed, the key
+# bar on the last row: --height 70)
+click() { printf '\e[<%s;%s;%sM' "${3:-0}" "$1" "$2"; }    # click <col> <row> [button]
+row_of() { frame 80 | grep -nF -- "$1" | head -n1 | cut -d: -f1; }
+col_of() { local pre=${1%%"$2"*}; echo $(( ${#pre} + 1 )); } # col_of <line> <text>
+out="$(frame 80)"; bar=$(tail -n1 <<< "$out"); need=$(grep -F 'needs you' <<< "$out")
+r=$(row_of "busy1  being built")
+has "$(frame 80 --press "$(click 3 "$r")")" "▸◐ busy1"                      # click selects
+has "$(frame 80 --press "$(click 3 "$((r + 1))")")" "▸◐ busy1"              # any of its rows
+hasnt "$(frame 80 --press "$(click 3 "$r" 0 | tr M m)")" "▸◐ busy1"         # a release does nothing
+hasnt "$(frame 80 --press "$(click 3 "$r" 2)")" "▸◐ busy1"                  # nor another button
+has "$(frame 80 --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")")" "o reopen  x drop"
+has "$(PAGER='head -n1' frame 80 --press "$(click 3 "$r")$(click 3 "$r")")" "== busy1 · feature · working"  # again opens
+has "$(PAGER='head -n1' frame 80 --press "$(click "$(col_of "$bar" '? keys')" 70)")" "coord watch keys"
+has "$(frame 80 --press "$(click 3 "$r" 65)$(click 3 "$r" 65)")" "▸◐ busy1"  # wheel moves the selection
+has "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)")" "↑ 1 newer" # and scrolls the feed
+hasnt "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)$(click 3 "$(row_of '─ RECENT')" 64)")" "newer"
+# prompts: typed, with ✓ send / ✗ cancel on the reply row (row 69)
+{ printf 'no'; click 75 69; echo; } | frame 80 --press m >/dev/null; hasnt "$("$COORD" log)" "msg - no"
+{ printf 'drop\e'; } | frame 80 --press m >/dev/null; hasnt "$("$COORD" log)" "msg - drop"   # esc cancels
+has "$( { printf 'hi therex\177'; click 65 69; } | frame 80 --press m)" "ok: sent"
+has "$("$COORD" log)" "msg - hi there"
+# a click never skips drop's typed confirmation
+has "$( { click 65 69; } | frame 80 --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")x")" "x drop"
+assert "$(state_of dead1)" blocked
+
 # keys: approve the selected passed unit -> approved and merged
 has "$(frame 80 --press a)" "› ok: MERGED pass1"
 assert "$(state_of pass1)" merged

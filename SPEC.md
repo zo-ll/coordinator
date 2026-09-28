@@ -370,7 +370,13 @@ writes only the lines that changed. Clean passes merge on their own (autonomy=au
 runs `approve` then `merge`, so a unit that needs the user merges even while
 the coordinator is stuck; `merge`
 holds a run-wide lock, so watch and the coordinator never merge at once.
-`--once` prints one frame for scripts and tests.
+The mouse (xterm SGR reporting, on only while watch holds the screen) reaches
+everything the keys do: each frame records which item, "needs you" entry, or
+key owns which rows and columns as it builds its lines, and a click or wheel
+turn is hit-tested against that map. Prompts stay typed, with ✓ send / ✗
+cancel targets; drop still asks for "yes".
+`--once` prints one frame for scripts and tests; `--press` feeds it keys and
+mouse reports first.
 
 ### Roles
 

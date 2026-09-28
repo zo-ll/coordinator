@@ -45,6 +45,30 @@ ansi() {
   printf '%s' "${s//$W_SE/$'\e[0m'}"
 }
 
+# hits <markup> <style>: "from to text" for each <style> segment, in 1-based
+# columns; a segment's span runs up to the next one, so it takes its label
+hits() {
+  local s=$1 n=0 k t from=() txt=() i
+  while [ -n "$s" ]; do
+    if [[ $s == "$W_SO"* ]]; then
+      k=${s:1}; k=${k%%"$W_SM"*}; s=${s#*"$W_SM"}; t=${s%%"$W_SE"*}; s=${s#*"$W_SE"}
+    else
+      k=""; t=${s%%"$W_SO"*}; s=${s:${#t}}
+    fi
+    [ "$k" != "$2" ] || { from+=($((n + 1))); txt+=("$t"); }
+    n=$((n + ${#t}))
+  done
+  for i in "${!from[@]}"; do
+    printf '%s %s %s\n' "${from[i]}" "$(( ${from[i + 1]:-$((n + 1))} - 1 ))" "${txt[i]}"
+  done
+}
+# at <x> <"from to value">...: the value whose span holds column x
+at() {
+  local x=$1 f t v; shift
+  for v in "$@"; do read -r f t v <<< "$v"; [ "$x" -lt "$f" ] || [ "$x" -gt "$t" ] || { printf '%s' "$v"; return 0; }; done
+  return 1
+}
+
 lr() { local l=$1 r=$2 w=$3 gap; gap=$((w - $(vis "$l") - $(vis "$r"))); [ "$gap" -ge 1 ] || gap=1; printf '%s%*s%s' "$l" "$gap" '' "$r"; }
 rule() {
   local l r fill
@@ -63,7 +87,7 @@ wrap() { fold -s -w "$2" <<< "$1" | sed 's/ *$//' | head -n "$3"; }
 
 watch_gather() {
   NOW=$(printf '%(%s)T' -1)
-  UNITS=(); FEED=(); ITEMS=(); NEED=()
+  UNITS=(); FEED=(); ITEMS=(); NEED=(); NEED_IX=()
   declare -gA REASON=() CRITIC=() STATE=() REPORT=()
   RUN_START="" WOKE_TS="" WOKE_FOR="" ACKED=""
   [ -f "$LOG" ] || return 1
@@ -99,21 +123,23 @@ watch_gather() {
 
 # watch_items: the WORK list, in a stable order: units in progress (creation
 # order), open decisions, unread research reports, live researchers. ITEMS
-# holds "kind<TAB>id"; NEED counts what waits on the user.
+# holds "kind<TAB>id"; NEED lists what waits on the user, NEED_IX the item
+# each entry selects.
+need() { NEED+=("$1"); NEED_IX+=($(( ${#ITEMS[@]} - 1 ))); }
 watch_items() {
   local row id st g slug pid
-  ITEMS=(); NEED=()
+  ITEMS=(); NEED=(); NEED_IX=()
   for row in "${UNITS[@]}"; do
     IFS=$US read -r id st _ <<< "$row"
     case $st in todo|merged|dropped) continue ;; esac
     ITEMS+=("unit"$'\t'"$id")
-    needs_you "$row" && NEED+=("$(glyph "$st") $id")
+    needs_you "$row" && need "$(glyph "$st") $id"
   done
   if [ -f "$RUN/gates.tsv" ]; then
-    while IFS=$'\t' read -r g st _; do [ "$st" = open ] && { ITEMS+=("gate"$'\t'"$g"); NEED+=("? $g"); }; done < "$RUN/gates.tsv"
+    while IFS=$'\t' read -r g st _; do [ "$st" = open ] && { ITEMS+=("gate"$'\t'"$g"); need "? $g"; }; done < "$RUN/gates.tsv"
   fi
   for slug in $(printf '%s\n' "${!REPORT[@]}" | sort -t. -k2 -n); do
-    grep -qxF "$slug" "$RUN/watch.read" 2>/dev/null || { ITEMS+=("report"$'\t'"$slug"); NEED+=("≡ $slug"); }
+    grep -qxF "$slug" "$RUN/watch.read" 2>/dev/null || { ITEMS+=("report"$'\t'"$slug"); need "≡ $slug"; }
   done
   while IFS=$US read -r slug pid _; do
     [ -n "$slug" ] && alive "$pid" && ITEMS+=("research"$'\t'"$slug")
@@ -291,10 +317,12 @@ coordinator_line() {
   printf ' coordinator  %s' "$s"
 }
 
-# watch_frame <width> <height>: FRAME (body lines), KEYS
+# watch_frame <width> <height>: FRAME (body lines), KEYS, and the click map
+# taken from the same lines: HIT[row] ("item <i>", need, work, feed) and
+# NEED_HIT ("from to item" per "needs you" entry)
 watch_frame() {
   local w=$1 h=$2 body=() l i n row st
-  FRAME=()
+  FRAME=(); HIT=(); NEED_HIT=(); W_W=$w W_H=$h
   if ! watch_gather; then
     FRAME=(" $(m b 'coord watch')" '' "   $(m d 'No run here yet. Ask your agent to coordinate some work;')" "   $(m d 'this screen follows it as soon as it starts.')")
     KEYS=" $(m k q) quit"; return
@@ -304,8 +332,13 @@ watch_frame() {
   body+=("$(lr " $(m b 'coord watch') $(m d ·) ${REPO##*/}" "$(m d "$right") " "$w")")
   body+=("$(coordinator_line)")
   if [ "${#NEED[@]}" -gt 0 ]; then
-    local nl="" x; for x in "${NEED[@]}"; do nl+="${nl:+ $(m d ·) }$x"; done
-    body+=(" $(m yb 'needs you')    $nl")
+    local nl=" $(m yb 'needs you')    " x c
+    for x in "${!NEED[@]}"; do
+      [ "$x" = 0 ] || nl+=" $(m d ·) "
+      c=$(( $(vis "$nl") + 1 )); nl+=${NEED[x]}
+      NEED_HIT+=("$c $(vis "$nl") ${NEED_IX[x]}")
+    done
+    HIT[${#body[@]}]=need; body+=("$nl")
   fi
   body+=('')
   if [ "$STUCK" = 1 ]; then
@@ -330,18 +363,24 @@ watch_frame() {
     mapfile -t -O "${#body[@]}" body < <(box 'RUN FINISHED' "$merged merged" g "$w" "${shipped[@]}")
     body+=('')
   else
-    body+=("$(rule WORK "$(m d "${#ITEMS[@]} active")" "$w")")
+    HIT[${#body[@]}]=work; body+=("$(rule WORK "$(m d "${#ITEMS[@]} active")" "$w")")
     if [ "${#ITEMS[@]}" -gt 0 ]; then
-      for i in "${!ITEMS[@]}"; do mapfile -t -O "${#body[@]}" body < <(item_lines "$i" "$w"); done
+      for i in "${!ITEMS[@]}"; do
+        n=${#body[@]}
+        mapfile -t -O "$n" body < <(item_lines "$i" "$w")
+        while [ "$n" -lt "${#body[@]}" ]; do HIT[n++]="item $i"; done
+      done
     elif [ "${#UNITS[@]}" -eq 0 ]; then body+=("$(m d '   nothing yet: the coordinator is still planning')")
     else body+=("$(m d '   nothing in progress')"); fi
     mapfile -t -O "${#body[@]}" body < <(queue_lines)
     body+=('')
   fi
-  body+=("$(rule RECENT '' "$w")")
+  # the feed, newest first, FEED_OFF entries scrolled back by the wheel
+  [ "$FEED_OFF" -lt "${#FEED[@]}" ] || FEED_OFF=$(( ${#FEED[@]} > 0 ? ${#FEED[@]} - 1 : 0 ))
+  HIT[${#body[@]}]=feed; body+=("$(rule RECENT "$( [ "$FEED_OFF" = 0 ] || m d "↑ $FEED_OFF newer")" "$w")")
   n=$(( h - 3 - ${#body[@]} ))
-  for (( i = ${#FEED[@]} - 1; i >= 0 && n > 0; i--, n-- )); do
-    body+=("$(m d " $(hm "${FEED[i]%%$'\t'*}")")  ${FEED[i]#*$'\t'}")
+  for (( i = ${#FEED[@]} - 1 - FEED_OFF; i >= 0 && n > 0; i--, n-- )); do
+    HIT[${#body[@]}]=feed; body+=("$(m d " $(hm "${FEED[i]%%$'\t'*}")")  ${FEED[i]#*$'\t'}")
   done
   FRAME=("${body[@]:0:$((h - 3))}")
   local pk=""
@@ -354,8 +393,10 @@ watch_frame() {
 # ---------------------------------------------------------------- terminal
 
 W_REPLY=""
-term_on()  { stty -echo -icanon 2>/dev/null; printf '\e[?1049h\e[?25l'; W_FULL=1; }
-term_off() { printf '\e[?25h\e[?1049l'; [ -z "${W_STTY:-}" ] || stty "$W_STTY" 2>/dev/null; }
+# mouse reporting (xterm SGR) is on only while the screen is ours: off for the
+# pager and on exit; a terminal without it ignores the request
+term_on()  { stty -echo -icanon 2>/dev/null; printf '\e[?1049h\e[?25l\e[?1000h\e[?1006h'; W_FULL=1; }
+term_off() { printf '\e[?1006l\e[?1000l\e[?25h\e[?1049l'; [ -z "${W_STTY:-}" ] || stty "$W_STTY" 2>/dev/null; }
 
 draw() {
   local w h i line out=""
@@ -375,13 +416,57 @@ draw() {
   printf '%s' "$out"; W_FULL=0
 }
 
-# ask <prompt markup>: one line typed on the reply row -> ANSWER (empty = cancelled)
+# read_key <fd> [timeout]: one key -> KEY: a character ("" is ↵), UP, DOWN,
+# ESC, M:<b>;<x>;<y><M|m> for an SGR mouse report, or NONE for any other
+# escape sequence (read whole, so its tail isn't taken for keys)
+read_key() {
+  local c s="" t=()
+  [ -z "${2:-}" ] || t=(-t "$2")
+  IFS= read -rsn1 -u "$1" "${t[@]}" KEY || return 1
+  [ "$KEY" = $'\e' ] || return 0
+  KEY=ESC
+  IFS= read -rsn1 -u "$1" -t 0.01 c && [ "$c" = '[' ] || return 0
+  while IFS= read -rsn1 -u "$1" -t 0.01 c; do
+    s+=$c; case $c in [A-Za-z~]) break ;; esac; [ "${#s}" -lt 24 ] || break
+  done
+  case $s in A) KEY=UP ;; B) KEY=DOWN ;; '<'*[Mm]) KEY="M:${s#<}" ;; *) KEY=NONE ;; esac
+}
+
+# mouse <M:b;x;y[Mm]>: MB MX MY for a press (b 0 left, 64/65 wheel up/down);
+# fails on a release or any other button
+mouse() {
+  local r=${1#M:}
+  [[ $r == *M ]] || return 1
+  IFS=';' read -r MB MX MY <<< "${r%M}"
+  case $MB in 0|64|65) ;; *) return 1 ;; esac
+}
+
+# ask <prompt markup>: one line typed on the reply row -> ANSWER (empty =
+# cancelled). ↵ or a click on ✓ send sends it; esc or ✗ cancel cancels.
 ask() {
-  local h; h=$(tput lines 2>/dev/null || echo 24)
-  printf '\e[%d;1H\e[2K%s\e[?25h' "$((h - 1))" "$(ansi "$1")"
-  stty echo icanon 2>/dev/null
-  IFS= read -r ANSWER || ANSWER=""
-  stty -echo -icanon 2>/dev/null; printf '\e[?25l'; W_FULL=1
+  local p=$1 text="" line shown room act r
+  ANSWER=""; r="$(m k '✓ send')  $(m k '✗ cancel') "
+  while :; do
+    room=$(( W_W - $(vis "$p") - $(vis "$r") - 1 )); [ "$room" -ge 1 ] || room=1
+    shown=$(clean "$text"); [ "${#shown}" -le "$room" ] || shown="…${shown: -$((room - 1))}"
+    line=$(lr "$p$shown" "$r" "$W_W")
+    mapfile -t REPLY_HIT < <(hits "$line" k)
+    [ "$W_LIVE" != 1 ] || printf '\e[%d;1H\e[2K%s\e[%d;%dH\e[?25h' $((W_H - 1)) "$(ansi "$(fit "$line" "$W_W")")" \
+      $((W_H - 1)) $(( $(vis "$p") + ${#shown} + 1 ))
+    read_key 0 || break                             # end of input: cancelled
+    case $KEY in
+      '') ANSWER=$text; break ;;
+      ESC) break ;;
+      $'\177'|$'\b') text=${text%?} ;;
+      $'\025') text="" ;;
+      M:*) if mouse "$KEY" && [ "$MB" = 0 ] && [ "$MY" = $((W_H - 1)) ] && act=$(at "$MX" "${REPLY_HIT[@]}"); then
+             [ "$act" = '✓ send' ] && ANSWER=$text; break
+           fi ;;
+      UP|DOWN|NONE) ;;
+      *) [[ $KEY == [[:cntrl:]] ]] || text+=$KEY ;;
+    esac
+  done
+  [ "$W_LIVE" != 1 ] || printf '\e[?25l'; W_FULL=1
 }
 
 # run <cmd...>: a coord command, its one-line reply on the reply row
@@ -446,11 +531,43 @@ Anywhere
   ?       this page
   q       quit (the run keeps going)
 
+Mouse
+  click an item to select it, the selected one again to open it; click a
+  "needs you" entry to jump to it, a key in the bottom bar to press it.
+  The wheel moves the selection over WORK and scrolls RECENT back.
+  In a prompt: ↵ or ✓ send sends, esc or ✗ cancel cancels. Shift-drag
+  selects text in most terminals while watch has the mouse.
+
 Clean passes merge on their own. A unit shows "needs you" when the critic
 left notes, the unit is marked risky, or it is blocked; open decisions and
 unread reports need you too.
 EOF
   page "$f"
+}
+
+# on_mouse <M:...>: a click or wheel turn, hit-tested against the last frame.
+# Click an item to select it, the selected one to open it, a "needs you"
+# entry to select its item, a key in the bar to press it; the wheel moves
+# the selection over WORK and scrolls RECENT.
+on_mouse() {
+  local k i hit=()
+  mouse "$1" || return 0
+  if [ "$MY" = "$W_H" ]; then
+    mapfile -t hit < <(hits "$KEYS" k)
+    [ "$MB" = 0 ] && k=$(at "$MX" "${hit[@]}") || return 0
+    case $k in j/k) return 0 ;; ↵) k='' ;; esac
+    on_key "$k"; return
+  fi
+  [ "$MY" -le "${#FRAME[@]}" ] || return 0
+  case $MB:${HIT[MY - 1]:-} in
+    0:item*) i=${HIT[MY - 1]#item }; if [ "$i" = "$SEL" ]; then on_key ''; else SEL=$i; fi ;;
+    0:need) i=$(at "$MX" "${NEED_HIT[@]}") && SEL=$i ;;
+    64:item*|64:work) [ "$SEL" -eq 0 ] || SEL=$((SEL - 1)) ;;
+    65:item*|65:work) [ "$SEL" -ge $(( ${#ITEMS[@]} - 1 )) ] || SEL=$((SEL + 1)) ;;
+    64:feed) [ "$FEED_OFF" -eq 0 ] || FEED_OFF=$((FEED_OFF - 1)) ;;
+    65:feed) FEED_OFF=$((FEED_OFF + 1)) ;;
+  esac
+  return 0
 }
 
 on_key() {
@@ -481,6 +598,7 @@ on_key() {
     m) ask "$(m c 'to the coordinator ›') "; [ -z "$ANSWER" ] || { run msg - "$ANSWER" && W_REPLY=" $(m d ›) ok: sent; the coordinator wakes to read it"; } ;;
     w) run relay --detach ;;
     '?') keys_page ;;
+    M:*) on_mouse "$key"; return ;;
     '') case $kind in
           unit) unit_page "$id" ;;
           report) echo "$id" >> "$RUN/watch.read"; page "$(cut -f1 <<< "${REPORT[$id]}")" ;;
@@ -494,13 +612,15 @@ on_key() {
 #   watch [--once] [--width N] [--height N]
 cmd_watch() {
   parse_args watch "width height press" "" "once" "$@"
-  SEL=0 W_LIVE=0
+  SEL=0 W_LIVE=0 FEED_OFF=0
   W_COLOR=0; { [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; } && W_COLOR=1
   if [ "${F[once]:-0}" = 1 ] || [ ! -t 0 ] || [ ! -t 1 ]; then
     local w=${F[width]:-$(tput cols 2>/dev/null || echo 80)} h=${F[height]:-40} l
     [ "$w" -ge 44 ] || w=44
-    local keys=${F[press]:-} i   # --press: keys to act on first (tests)
-    for (( i = 0; i < ${#keys}; i++ )); do watch_frame "$w" "$h"; on_key "${keys:i:1}" || break; done
+    local pfd   # --press: keys (and mouse reports) to act on first (tests)
+    exec {pfd}< <(printf '%s' "${F[press]:-}")
+    while read_key "$pfd"; do watch_frame "$w" "$h"; on_key "$KEY" || break; done
+    exec {pfd}<&-
     watch_frame "$w" "$h"
     [ -z "$W_REPLY" ] || FRAME+=("$W_REPLY")
     for l in "${FRAME[@]}" "$(m d "$(rep ─ "$w")")" "$KEYS"; do ansi "$(fit "$l" "$w")" | sed 's/ *$//'; echo; done
@@ -510,15 +630,8 @@ cmd_watch() {
   trap 'term_off' EXIT
   trap 'W_FULL=1' WINCH
   term_on
-  local key k2
   while :; do
     draw
-    if IFS= read -rsn1 -t 1 key; then
-      if [ "$key" = $'\e' ]; then
-        IFS= read -rsn2 -t 0.01 k2 || true
-        case $k2 in '[A') key=UP ;; '[B') key=DOWN ;; *) continue ;; esac
-      fi
-      on_key "$key" || break
-    fi
+    ! read_key 0 1 || on_key "$KEY" || break
   done
 }
