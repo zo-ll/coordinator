@@ -95,6 +95,8 @@ has "$out" "▲ passed · needs your approval"
 has "$out" "           passes review"                                           # its goal
 has "$out" "  1 brief  2 findings  3 diff  4 log  5 output  6 history"
 has "$out" "1-6 tab  j/k scroll  esc back  a approve  r reject  p pager"
+out="$("$COORD" watch --once --width 60 --height 40 --open pass1 --tab diff)"   # the design's own width
+has "$out" "▲ needs approval"; has "$out" " j/k scroll  esc back  a approve  r reject  n/N file"   # the bar sheds 1-6, never the tab's keys
 view() { "$COORD" watch --once --width 80 --height "${H:-70}" --open "$@"; }
 # 3a brief: a headed section per field, deps, what it blocks, who wrote it
 out="$(view pass1)"
@@ -107,7 +109,7 @@ has "$out" "Written by the coordinator at"
 # 3b findings: newest round first, its summary, checks and notes
 out="$(view pass1 --tab findings)"
 has "$out" " Round 1  passed · evidence ●●○ tests · "
-has "$out" '   "looks right"'; has "$out" $' Checks\n   $ test -f file.txt'
+has "$out" '   "looks right"'; has "$out" $' Checks\n   $ test -f file.txt\n   – live check  not run'
 # 3c diff: the summary, then a rule per file, no git headers
 out="$(view pass1 --tab diff)"
 has "$out" " 1 file  +1 −0"; has "$out" "branch coord/pass1 (round 1)"
@@ -193,5 +195,18 @@ out="$(view strict)"
 has "$out" " Merge of round 1  "; has "$out" "✗ failed · exit 1"; has "$out" '$ test "$(wc -l < file.txt)" -gt 99'
 has "$out" "exit 1 · sent back to the worker at"
 has "$(view strict --tab findings)" "✗ the merge re-ran the checks: exit 1 (see 4 log)"
+
+# DEL and C1 controls in event text never reach the terminal
+"$COORD" msg strict $'odd\x7f\xc2\x9b31m text' >/dev/null
+out="$(frame 80)"; has "$out" "odd31m text"; hasnt "$out" $'\xc2\x9b'
+has "$(view strict --tab history)" "odd"; hasnt "$(view strict --tab history)" $'\x7f'
+
+# an agent restarted after a death: its output tab says running, not the old death
+fake_resume; echo sess-1 > .coordinator/session
+"$COORD" unit add again --kind chore --goal again >/dev/null
+FAKE_WORKER=exit "$COORD" dispatch again --role worker --brief "$TMP/brief" >/dev/null
+"$COORD" relay --once --interval 0.1 >/dev/null; wait_for is_state again stalled
+FAKE_WORKER=sleep "$COORD" dispatch again --role worker >/dev/null
+out="$(view again --tab output)"; has "$out" " worker · round 1  0m of 20m · running"; hasnt "$out" "died"
 
 echo "  watch ok"

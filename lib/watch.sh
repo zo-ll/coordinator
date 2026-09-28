@@ -102,7 +102,7 @@ watch_gather() {
       A) ACKED=$a ;;
       P) REPORT[$a]="$b"$'\t'"$c"$'\t'"$d" ;;
     esac
-  done < <(awk -f "$SKILL/lib/watch.awk" "$LOG")
+  done < <(unc1 "$LOG" | awk -f "$SKILL/lib/watch.awk")
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     UNITS+=("$line"); id=${line%%"$US"*}
@@ -404,6 +404,10 @@ watch_frame() {
 TABS=(brief findings diff log output history)
 TABS_SHORT=(brief finds diff log out hist)   # under 60 columns
 
+# unc1 [file]: the text without DEL and UTF-8 C1 controls, byte-wise (awk
+# can't match them in a UTF-8 locale; C0 is its q()'s job)
+unc1() { LC_ALL=C sed 's/\x7f//g; s/\xc2[\x80-\x9f]//g' "$@"; }
+
 # plain: untrusted text as lines: no escapes, tabs expanded, no control
 # characters (C0, DEL, and UTF-8 C1)
 plain() { LC_ALL=C sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\xc2[\x80-\x9f]//g' | expand -t 4 | tr -d '\000-\010\013-\037\177'; }
@@ -435,7 +439,7 @@ EV_AWK='
   E["unit"] != id { next }
   { t = E["type"] }
 '
-ev_awk() { local id=$1 prog=$2; shift 2; awk -F'\t' -v id="$id" -v w="$W_W" "$@" "$EV_AWK$prog" "$LOG"; }
+ev_awk() { local id=$1 prog=$2; shift 2; unc1 "$LOG" | awk -F'\t' -v id="$id" -v w="$W_W" "$@" "$EV_AWK$prog"; }
 
 # brief_fields: one headed section per brief field: the ones the worker acts
 # on first, then the brief's others in its order
@@ -487,7 +491,9 @@ brief_tab() {
 # outcome (and what became of them: a failed merge, a note, a merge)
 findings_tab() {
   ev_awk "$VIEW" '
-    t == "dispatched" && E["role"] == "critic" { n++; R[n] = E["round"]; RES[n] = "being reviewed"; next }
+    t == "dispatched" && E["role"] == "critic" {   # a critic restarted after a death stays the same round
+      if (!(n && R[n] == E["round"] && RES[n] ~ /died/)) n++
+      R[n] = E["round"]; RES[n] = "being reviewed"; next }
     t == "finished" && E["role"] == "critic" && n {
       RES[n] = E["result"] == "pass" ? "passed" : E["result"] == "handback" ? "sent back" : E["result"]
       LV[n] = E["level"]; TS[n] = E["ts"]; SUM[n] = E["summary"]; NOTE[n] = E["notes"]; CMD[n] = RAN; next }
@@ -503,7 +509,10 @@ findings_tab() {
         print " " m("b", "Round " R[i]) "  " RES[i] e (TS[i] == "" ? "" : m("d", " · " hm(TS[i])))
         if (i == n) {
           if (SUM[i] != "") { print ""; wrap("\"" SUM[i] "\"", w - 4, "   ", "    ") }
-          if (CMD[i] != "") { print ""; print " " m("b", "Checks"); k = split(substr(CMD[i], 2), c, "\n"); for (j = 1; j <= k; j++) print "   $ " c[j] }
+          if (CMD[i] != "" || LV[i] != "") {
+            print ""; print " " m("b", "Checks"); k = split(substr(CMD[i], 2), c, "\n"); for (j = 1; j <= k; j++) print "   $ " c[j]
+            if (LV[i] != "" && LV[i] != "live") print "   " m("d", "– live check  not run")
+          }
           if (NOTE[i] != "") { print ""; print " " m("b", "Findings"); k = split(NOTE[i], c, / \| /); for (j = 1; j <= k; j++) wrap(c[j], w - 10, "   " m("y", "note") "  ", "         ") }
           if (OUT[i] != "") print ""
         }
@@ -573,6 +582,7 @@ log_tab() {
   [ -f "$f" ] || { echo " $(m d "the merge's checks haven't run")"; return 0; }
   head=$(ev_awk "$VIEW" '
     t == "dispatched" { r = E["round"] }
+    t == "approved" { k = "" }   # a new merge: its checks are the ones in the log now
     t == "verify_failed" { k = "f"; ts = E["ts"]; x = E["exit"]; rr = r }
     t == "merged" { k = "m"; ts = E["ts"]; sha = substr(E["sha"], 1, 7); rr = r }
     END {
@@ -601,7 +611,7 @@ output_tab() {
   f=${OUTS[OUT_AT]} slug=${f##*/}; slug=${slug%.log}; role=${slug##*.}; r=${slug#"$VIEW".r}; r=${r%%.*}
   ev_awk "$VIEW" '
     E["slug"] != slug { next }
-    t == "dispatched" { d = E["ts"]; tb = E["timebox"] }
+    t == "dispatched" { d = E["ts"]; tb = E["timebox"]; e = ""; how = "" }   # a restart reuses the slug
     t == "finished" { e = E["ts"]; how = "finished at " hm(e) " · " E["result"] }
     t == "died" { e = E["ts"]; how = m("r", (E["reason"] == "timeout" ? "killed at its time limit" : "died") " at " hm(e)) }
     END {
@@ -621,7 +631,7 @@ output_tab() {
 
 # 3f: the unit's story, oldest first, in the feed's words
 history_tab() {
-  awk -F'\t' -v id="$VIEW" 'index($0, "\tunit=" id "\t")' "$LOG" | awk -f "$SKILL/lib/watch.awk" \
+  unc1 "$LOG" | awk -F'\t' -v id="$VIEW" 'index($0, "\tunit=" id "\t")' | awk -f "$SKILL/lib/watch.awk" \
     | awk -F'\t' '$1 == "F" { print " \001d\002" strftime("%H:%M", $2) "\003  " $3; n++ } END { if (!n) print " \001d\002no events yet\003" }'
 }
 
@@ -654,7 +664,15 @@ unit_frame() {
   local left right
   left=" $(m d 'esc ‹')  $(m b "$id")  $(m d "$U_KIND · round $U_ROUND")"
   right="$(glyph "$U_STATE") $(sentence "$row") "   # the sentence, or just the state when it won't fit
-  [ $(( $(vis "$left") + $(vis "$right") )) -lt "$w" ] || right="$(glyph "$U_STATE") $(m y "$U_STATE") "
+  if [ $(( $(vis "$left") + $(vis "$right") )) -ge "$w" ]; then
+    case $U_STATE in
+      passed) if needs_you "$row"; then right=$(m y 'needs approval'); else right='merging'; fi ;;
+      stalled|blocked) right=$(m r "$U_STATE") ;;
+      merged|dropped) right=$(m d "$U_STATE") ;;
+      *) right=$U_STATE ;;
+    esac
+    right="$(glyph "$U_STATE") $right "
+  fi
   body+=("$(lr "$left" "$right" "$w")")
   body+=("           $(m d "$(clean "$U_GOAL")")" '')
   TABBAR=" " TAB_HIT=()
@@ -680,7 +698,12 @@ unit_frame() {
   [ "$U_STATE" != passed ] || pk="$(m k a) approve  $(m k r) reject  "
   [ "$TAB" != 3 ] || pk+="$(m k n/N) file  "
   [ "$TAB" != 5 ] || pk+="$(m k '[/]') round  "
-  KEYS=" $(m k 1-6) tab  $(m k j/k) scroll  $(m k esc) back  $pk$(m k p) pager"
+  # when it's too long the bar sheds "1-6 tab" (the tab bar shows the digits),
+  # then "p pager"; never esc or the tab's own keys
+  KEYS=" $(m k 1-6) tab  $(m k j/k) scroll  $(m k esc) back  $pk"
+  [ $(( $(vis "$KEYS") - 2 )) -le "$w" ] || KEYS=" $(m k j/k) scroll  $(m k esc) back  $pk"
+  [ $(( $(vis "$KEYS") + 7 )) -gt "$w" ] || KEYS+="$(m k p) pager"
+  KEYS=${KEYS%  }
 }
 
 # view_key <key>: the unit view's own keys
