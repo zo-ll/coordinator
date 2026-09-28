@@ -65,16 +65,22 @@ click a key to press it, scroll the feed.
 ## Install
 
 ```sh
-bin/install.sh              # symlink this repo as <harness>/filo
-bin/install.sh --uninstall  # remove those symlinks
+git clone https://github.com/zo-ll/filo && filo/bin/install.sh
 ```
+
+That links the skill into every agent harness installed on the machine (pi,
+claude, codex, opencode, crush, goose, …: its home dir exists or its command
+is on the PATH) and the `filo` command into `~/.local/bin` (`FILO_BIN_DIR` to
+change it; it tells you if that dir isn't on your PATH). Run it again any
+time: it repairs links left by a moved checkout and never touches anything
+else named filo. `bin/install.sh --uninstall` removes only its own links.
 
 Upgrading from coord: remove any old `<harness>/coordinator` symlinks (the
 skill is `filo` now), and move `~/.coordinator/` to `~/.filo/`. A repo's old
 `.coordinator/` is not read; set the repo up again with `filo init`.
 
-The repo root is the skill, symlinked into every harness skill dir found on
-the machine, so edits and `git pull` stay live.
+The repo root is the skill, linked rather than copied, so edits and
+`git pull` stay live.
 
 ## Tests
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# install.sh: symlink the skill into harness dirs, idempotent, and uninstall.
+# install.sh: the skill in every installed harness and the filo command on the
+# PATH, stale links repaired, foreign ones kept, idempotent, and uninstall.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,30 +9,63 @@ REPO="$(cd "$HERE/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/h1" "$TMP/h2"
-export FILO_SKILL_DIRS="$TMP/h1:$TMP/h2:$TMP/absent"
-
 assert() { [ "$1" = "$2" ] || { echo "  assert failed: '$1' != '$2'"; exit 1; }; }
+has() { case "$1" in *"$2"*) ;; *) echo "  expected '$2' in: $1"; exit 1 ;; esac; }
+ours() { [ "$(readlink -f "$1")" = "$(readlink -f "$2")" ] || { echo "  $1 is not linked to $2"; exit 1; }; }
 
-out="$("$INSTALL")"
-assert "$out" "DONE linked=2 skipped=0"
-[ -L "$TMP/h1/filo" ] || { echo "  h1 not linked"; exit 1; }
-[ -L "$TMP/h2/filo" ] || { echo "  h2 not linked"; exit 1; }
-assert "$(readlink -f "$TMP/h1/filo")" "$REPO"
-[ -e "$TMP/absent" ] && { echo "  absent dir should not be created"; exit 1; }
+# a machine: claude has its home dir, codex only its command, goose neither
+export HOME="$TMP/home"
+mkdir -p "$HOME/.claude" "$TMP/fakebin"
+printf '#!/bin/sh\n' > "$TMP/fakebin/codex"; chmod +x "$TMP/fakebin/codex"
+export PATH="$TMP/fakebin:/usr/bin:/bin"
+unset FILO_SKILL_DIRS FILO_BIN_DIR
 
-# idempotent
-assert "$("$INSTALL")" "DONE linked=0 skipped=2"
+out="$("$INSTALL" 2>"$TMP/err")"
+assert "$out" "DONE skills=2 cli=$HOME/.local/bin/filo skipped=0"
+ours "$HOME/.claude/skills/filo" "$REPO"
+ours "$HOME/.codex/skills/filo" "$REPO"                      # skills dir created for an installed command
+[ ! -e "$HOME/.config/goose" ] || { echo "  goose is not installed"; exit 1; }
+ours "$HOME/.local/bin/filo" "$REPO/bin/filo"
+has "$(cat "$TMP/err")" "$HOME/.local/bin is not on your PATH"
+has "$(PATH="$HOME/.local/bin:$PATH" filo help | head -n1)" "filo: the coordinator engine"
 
-# does not clobber a foreign entry
-mkdir -p "$TMP/h3"
-ln -s /tmp "$TMP/h3/filo"
-FILO_SKILL_DIRS="$TMP/h3" "$INSTALL" >/dev/null 2>&1 || true
-assert "$(readlink "$TMP/h3/filo")" "/tmp"
+# idempotent, and says so
+out="$(PATH="$HOME/.local/bin:$PATH" "$INSTALL" 2>"$TMP/err")"
+assert "$out" "DONE skills=2 cli=$HOME/.local/bin/filo skipped=0"
+assert "$(cat "$TMP/err")" "nothing to change: filo is already set up"
 
-# uninstall removes only ours
-assert "$("$INSTALL" --uninstall)" "DONE removed=2 skipped=0"
-[ -L "$TMP/h1/filo" ] && { echo "  h1 not removed"; exit 1; }
-[ -L "$TMP/h2/filo" ] && { echo "  h2 not removed"; exit 1; }
+# a link left by a moved checkout, or by a deleted one, is repaired
+rm "$HOME/.claude/skills/filo"; ln -s "$TMP/old-checkout" "$HOME/.claude/skills/filo"   # deleted
+mkdir -p "$TMP/moved/bin"; printf -- '---\nname: filo\n---\n' > "$TMP/moved/SKILL.md"; touch "$TMP/moved/bin/filo"
+rm "$HOME/.local/bin/filo"; ln -s "$TMP/moved/bin/filo" "$HOME/.local/bin/filo"          # another checkout
+"$INSTALL" >/dev/null 2>"$TMP/err"
+ours "$HOME/.claude/skills/filo" "$REPO"; ours "$HOME/.local/bin/filo" "$REPO/bin/filo"
+has "$(cat "$TMP/err")" "replaced: $HOME/.claude/skills/filo"
+
+# anything else named filo is left alone and reported
+rm "$HOME/.codex/skills/filo"; mkdir "$HOME/.codex/skills/filo"                          # someone's own skill
+rm "$HOME/.local/bin/filo"; printf '#!/bin/sh\n' > "$HOME/.local/bin/filo"               # another program
+out="$("$INSTALL" 2>"$TMP/err")"
+assert "$out" "DONE skills=1 cli=skipped skipped=2"
+has "$(cat "$TMP/err")" "SKIP (exists, not ours): $HOME/.codex/skills/filo"
+[ -d "$HOME/.codex/skills/filo" ] && [ ! -L "$HOME/.local/bin/filo" ] || { echo "  a foreign filo was touched"; exit 1; }
+rmdir "$HOME/.codex/skills/filo"; rm "$HOME/.local/bin/filo"
+
+# FILO_BIN_DIR picks the command's dir
+out="$(FILO_BIN_DIR="$TMP/mybin" "$INSTALL" 2>/dev/null)"
+has "$out" "cli=$TMP/mybin/filo"; ours "$TMP/mybin/filo" "$REPO/bin/filo"
+
+# uninstall removes only ours: the skill links and both command links it made
+"$INSTALL" >/dev/null 2>&1
+assert "$("$INSTALL" --uninstall 2>/dev/null)" "DONE removed=3 skipped=0"
+assert "$(FILO_BIN_DIR="$TMP/mybin" "$INSTALL" --uninstall 2>/dev/null)" "DONE removed=1 skipped=0"
+[ ! -e "$HOME/.claude/skills/filo" ] && [ ! -e "$HOME/.local/bin/filo" ] && [ ! -e "$TMP/mybin/filo" ] \
+  || { echo "  uninstall left links"; exit 1; }
+
+# FILO_SKILL_DIRS replaces the harness list; a dir whose parent is missing is skipped
+mkdir -p "$TMP/h1"
+out="$(FILO_SKILL_DIRS="$TMP/h1/skills:$TMP/absent/skills" FILO_BIN_DIR="$TMP/bin2" "$INSTALL" 2>/dev/null)"
+assert "$out" "DONE skills=1 cli=$TMP/bin2/filo skipped=0"
+ours "$TMP/h1/skills/filo" "$REPO"; [ ! -e "$TMP/absent" ] || { echo "  absent dir created"; exit 1; }
 
 echo "  install ok"
