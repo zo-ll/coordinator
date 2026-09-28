@@ -112,6 +112,22 @@ for i in $(seq -w 1 50); do echo "line $i"; done >> .coordinator/log/busy1.r1.wo
 has "$(H=14 view busy1 --tab output)" "line 50"
 hasnt "$(H=14 view busy1 --tab output --press k)" "line 50"
 has "$(H=14 view busy1 --tab output --press k)" "of 51"
+# the newest output stays the newest: a new round's log takes over, still followed
+echo "critic here" > .coordinator/log/busy1.r1.critic.log
+has "$(H=14 view busy1 --tab output)" "busy1.r1.critic.log"
+has "$(H=14 view busy1 --tab output --press '[')" "line 01"                  # an older round starts at its top
+has "$(H=14 view busy1 --tab output --press '[]')" "critic here"             # ] past the end: the newest again
+rm .coordinator/log/busy1.r1.critic.log
+# new files join the diff whatever their names, and nothing reaches stderr
+printf 'a\nb\n' > .coordinator/worktrees/pass1/café.txt
+out="$(view pass1 --tab diff 2>"$TMP/err")"
+has "$out" "café.txt  +2 −0 new"; has "$out" "+++ b/café.txt"; assert "$(cat "$TMP/err")" ""
+assert "$(git -c core.quotePath=false -C .coordinator/worktrees/pass1 status --short café.txt)" "?? café.txt"   # the real index untouched
+rm .coordinator/worktrees/pass1/café.txt
+# narrow: the tab bar keeps all six; a bad --tab is refused
+has "$("$COORD" watch --once --width 44 --height 30 --open pass1)" "6 hist"
+refuses "--tab is one of 1-6" "$COORD" watch --once --open pass1 --tab nope
+refuses 'no unit "nope"' "$COORD" watch --once --open nope
 # mouse: a tab name switches, the wheel scrolls, a unit in done opens its view
 bar=$(sed -n 2p <<< "$(view pass1)")
 has "$(view pass1 --press "$(click "$(col_of "$bar" diff)" 2)")" "─ diff ─"

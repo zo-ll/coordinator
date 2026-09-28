@@ -398,11 +398,14 @@ watch_frame() {
 
 # One unit, full screen, in six tabs. VIEW is the open unit, TAB the tab
 # (1-6), TSCROLL the first line shown, TFOLLOW 1 while the output tab sticks
-# to the tail, OUT_IX which round's output (-1 the newest).
+# to the tail, OUT_IX which round's output (-1 always the newest; OUT_AT is
+# the one this frame shows).
 TABS=(brief findings diff log output history)
+TABS_SHORT=(brief finds diff log out hist)   # under 60 columns
 
-# plain: untrusted text as lines: no escapes, tabs expanded, no control bytes
-plain() { sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | expand -t 4 | tr -d '\000-\010\013-\037\177'; }
+# plain: untrusted text as lines: no escapes, tabs expanded, no control
+# characters (C0, DEL, and UTF-8 C1)
+plain() { LC_ALL=C sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\xc2[\x80-\x9f]//g' | expand -t 4 | tr -d '\000-\010\013-\037\177'; }
 
 # out_logs <id>: the unit's agent output files, oldest first
 out_logs() { ls -tr "$RUN/log/$1".r*.*.log 2>/dev/null || true; }
@@ -437,31 +440,34 @@ findings() {
     }' "$LOG"
 }
 
-# diff_tab <id>: a file summary, then the diff (a merged unit: its merge commit)
+# diff_tab: a file summary, then the diff (a merged unit: its merge commit).
+# A worktree's new files join the diff through a scratch index that marks
+# them intent-to-add, so a few git calls cover any number of files.
 diff_tab() {
-  local f add del new files=0
+  local g=(git -c core.quotePath=false)
   if [ "$U_STATE" = merged ] && [ -n "$U_SHA" ]; then
-    set -- git -C "$REPO" diff "$U_SHA^1" "$U_SHA"
+    g+=(-C "$REPO"); set -- "$U_SHA^1" "$U_SHA"
   elif [ -d "$U_WT" ]; then
-    set -- git -C "$U_WT" diff HEAD
+    local -x GIT_INDEX_FILE="$RUN/watch.index"
+    rm -f "$GIT_INDEX_FILE"
+    "${g[@]}" -C "$U_WT" read-tree HEAD 2>/dev/null && "${g[@]}" -C "$U_WT" add -A -N 2>/dev/null || true
+    g+=(-C "$U_WT"); set -- HEAD
   else
     m d 'no changes: no worktree yet'; echo; return 0
   fi
-  while IFS=$'\t' read -r add del f; do
-    [ -n "$f" ] || continue; files=$((files + 1))
-    echo "  $(m b "$(clean "$f")")  $(m g "+$add") $(m r "−$del")"
-  done < <("$@" --numstat 2>/dev/null || true)
-  new=""
-  [ "$U_STATE" = merged ] || new=$(git -C "$U_WT" ls-files --others --exclude-standard 2>/dev/null || true)
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue; files=$((files + 1))
-    echo "  $(m b "$(clean "$f")")  $(m g "+$(wc -l < "$U_WT/$f" 2>/dev/null || echo 0)") $(m d new)"
-  done <<< "$new"
-  [ "$files" -gt 0 ] || { m d 'no changes yet'; echo; return 0; }
+  # the summary in one pass: "path  +a −d", new files marked; fails on no changes
+  { "${g[@]}" diff --name-only --diff-filter=A "$@" 2>/dev/null || true; echo $'\001'
+    "${g[@]}" diff --numstat "$@" 2>/dev/null || true; } > "$RUN/watch.stat"
+  awk -F'\t' '
+    function m(k, t) { return "\001" k "\002" t "\003" }
+    $0 == "\001" { stat = 1; next }
+    !stat { NEW[$0] = 1; next }
+    NF >= 3 { f = $3; gsub(/[\001-\037\177]/, " ", f); n++
+              print "  " m("b", f) "  " m("g", "+" $1) " " m("r", "−" $2) (($3 in NEW) ? m("d", " new") : "") }
+    END { if (!n) { print m("d", "no changes yet"); exit 1 } }' "$RUN/watch.stat" || return 0
   echo
-  { "$@" 2>/dev/null || true
-    while IFS= read -r f; do [ -z "$f" ] || git -C "$U_WT" diff --no-index /dev/null "$f" 2>/dev/null || true; done <<< "$new"
-  } | plain | sed $'s/^diff --git .*/\001b\002&\003/; t; s/^+.*/\001g\002&\003/; t; s/^-.*/\001r\002&\003/'
+  { "${g[@]}" diff "$@" 2>/dev/null || true; } | plain \
+    | sed $'s/^diff --git .*/\001b\002&\003/; t; s/^+.*/\001g\002&\003/; t; s/^-.*/\001r\002&\003/'
 }
 
 # tab_body <tab>: the tab's lines, as markup
@@ -476,8 +482,9 @@ tab_body() {
        else m d "the merge's checks haven't run"; echo; fi ;;
     5) mapfile -t OUTS < <(out_logs "$id")
        if [ "${#OUTS[@]}" -eq 0 ]; then m d 'no output yet'; echo; return 0; fi
-       [ "$OUT_IX" -ge 0 ] && [ "$OUT_IX" -lt "${#OUTS[@]}" ] || OUT_IX=$(( ${#OUTS[@]} - 1 ))
-       plain < "${OUTS[OUT_IX]}" ;;
+       OUT_AT=$OUT_IX
+       [ "$OUT_AT" -ge 0 ] && [ "$OUT_AT" -lt "${#OUTS[@]}" ] || OUT_AT=$(( ${#OUTS[@]} - 1 ))
+       plain < "${OUTS[OUT_AT]}" ;;
     6) cmd_log "$id" | plain ;;
   esac
 }
@@ -494,26 +501,26 @@ scroll() { TSCROLL=$((TSCROLL + $1)); [ "$TSCROLL" -ge 0 ] || TSCROLL=0; TFOLLOW
 
 # unit_frame <width> <height>: the open unit: header, tabs, the tab's lines
 unit_frame() {
-  local w=$1 h=$2 id=$VIEW row="" i t total rows max body=() f="$RUN/watch.tab" right
+  local w=$1 h=$2 id=$VIEW row="" i t sp total rows max body=() f="$RUN/watch.tab" right
   watch_gather || true
   unit_row "$id" || { VIEW=""; watch_frame "$w" "$h"; return; }
   for row in "${UNITS[@]}"; do [ "${row%%"$US"*}" = "$id" ] && break; done
   body+=("$(lr " $(glyph "$U_STATE") $(m b "$id") $(m d "· $U_KIND · round $U_ROUND ·") $(sentence "$row")" "$(m d "$(printf '%(%H:%M:%S)T' "$NOW")") " "$w")")
   TABBAR=" "
   for i in 1 2 3 4 5 6; do
-    t=${TABS[i - 1]}
-    if [ "$i" = "$TAB" ]; then TABBAR+="$(m k "$i")$(m I " $t ") "; else TABBAR+="$(m k "$i") $t  "; fi
+    t=${TABS[i - 1]} sp='  '; [ "$w" -ge 60 ] || t=${TABS_SHORT[i - 1]} sp=' '
+    if [ "$i" = "$TAB" ]; then TABBAR+="$(m k "$i")$(m I " $t ")${sp:1}"; else TABBAR+="$(m k "$i") $t$sp"; fi
   done
   HIT[1]=tabs; body+=("$TABBAR")
   tab_body "$TAB" > "$f"
   total=$(wc -l < "$f"); rows=$(( h - 3 - ${#body[@]} - 1 )); VIEW_ROWS=$rows
   max=$(( total > rows ? total - rows : 0 ))
-  # the output of a running agent follows its tail until you scroll up
-  if [ "$TAB" = 5 ] && [ -n "$U_OWES" ] && [ "$TFOLLOW" = 1 ]; then TSCROLL=$max; fi
+  # the newest output of a running agent follows its tail until you scroll up
+  if [ "$TAB" = 5 ] && [ -n "$U_OWES" ] && [ "$TFOLLOW" = 1 ] && [ "$OUT_IX" -lt 0 ]; then TSCROLL=$max; fi
   [ "$TSCROLL" -le "$max" ] || TSCROLL=$max
   [ "$TSCROLL" -lt "$max" ] || [ "$TAB" != 5 ] || TFOLLOW=1
   right=""
-  [ "$TAB" != 5 ] || [ "${#OUTS[@]}" -eq 0 ] || right="${OUTS[OUT_IX]##*/} · "
+  [ "$TAB" != 5 ] || [ "${#OUTS[@]}" -eq 0 ] || right="${OUTS[OUT_AT]##*/} · "
   [ "$total" -le "$rows" ] || right+="$((TSCROLL + 1))–$((TSCROLL + rows < total ? TSCROLL + rows : total)) of $total"
   right=${right% · }
   body+=("$(rule "${TABS[TAB - 1]}" "${right:+$(m d "$right")}" "$w")")
@@ -544,7 +551,9 @@ view_key() {
          mapfile -t OUTS < <(out_logs "$VIEW")
          [ "$OUT_IX" -ge 0 ] || OUT_IX=$(( ${#OUTS[@]} - 1 ))
          if [ "$1" = '[' ]; then [ "$OUT_IX" -le 0 ] || OUT_IX=$((OUT_IX - 1))
-         else [ "$OUT_IX" -ge $(( ${#OUTS[@]} - 1 )) ] || OUT_IX=$((OUT_IX + 1)); fi
+         else OUT_IX=$((OUT_IX + 1)); fi
+         # past the last round: back to "the newest", which follows a live agent
+         [ "$OUT_IX" -lt $(( ${#OUTS[@]} - 1 )) ] || OUT_IX=-1
          TSCROLL=0 TFOLLOW=1 ;;
     p) sed $'s/\001[a-zA-Z]*\002//g; s/\003//g' "$RUN/watch.tab" > "$RUN/watch.page"; page "$RUN/watch.page" ;;
     ESC) VIEW="" W_REPLY="" ;;
@@ -786,14 +795,18 @@ on_key() {
 cmd_watch() {
   parse_args watch "width height press open tab" "" "once" "$@"
   SEL=0 W_LIVE=0 FEED_OFF=0 VIEW="" TAB=1
+  if [ -n "${F[open]:-}" ]; then   # --open: start in a unit's view, on --tab (a name or 1-6)
+    watch_gather || true
+    open_unit "${F[open]}" || { fail 2 'watch: no unit "%s"' "${F[open]}"; return; }
+    local t tab=""
+    for t in 1 2 3 4 5 6; do case ${F[tab]:-} in "$t"|"${TABS[t - 1]}") tab=$t ;; esac; done
+    [ -z "${F[tab]:-}" ] || [ -n "$tab" ] || { fail 2 'watch: --tab is one of 1-6 or %s' "${TABS[*]}"; return; }
+    [ -z "$tab" ] || set_tab "$tab"
+  fi
   W_COLOR=0; { [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; } && W_COLOR=1
   if [ "${F[once]:-0}" = 1 ] || [ ! -t 0 ] || [ ! -t 1 ]; then
     local w=${F[width]:-$(tput cols 2>/dev/null || echo 80)} h=${F[height]:-40} l
     [ "$w" -ge 44 ] || w=44
-    if [ -n "${F[open]:-}" ]; then   # --open: start in a unit's view, on --tab (a name or 1-6)
-      watch_gather || true; open_unit "${F[open]}" || { echo "watch: no unit \"${F[open]}\"" >&2; return 1; }
-      local t; for t in 1 2 3 4 5 6; do case ${F[tab]:-} in "$t"|"${TABS[t - 1]}") set_tab "$t" ;; esac; done
-    fi
     local pfd   # --press: keys (and mouse reports) to act on first (tests)
     exec {pfd}< <(printf '%s' "${F[press]:-}")
     while read_key "$pfd"; do watch_frame "$w" "$h"; on_key "$KEY" || break; done
