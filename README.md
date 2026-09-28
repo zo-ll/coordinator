@@ -72,8 +72,10 @@ That links the skill into every agent harness installed on the machine (pi,
 claude, codex, opencode, crush, goose, …: its home dir exists or its command
 is on the PATH) and the `filo` command into `~/.local/bin` (`FILO_BIN_DIR` to
 change it; it tells you if that dir isn't on your PATH). Run it again any
-time: it repairs links left by a moved checkout and never touches anything
-else named filo. `bin/install.sh --uninstall` removes only its own links.
+time: filo links that point at nothing or at another filo checkout are
+repointed to this one (the last install wins), and anything else named filo
+is left alone. `bin/install.sh --uninstall` removes only its own links (give
+it the same `FILO_BIN_DIR` you installed with).
 
 Upgrading from coord: remove any old `<harness>/coordinator` symlinks (the
 skill is `filo` now), and move `~/.coordinator/` to `~/.filo/`. A repo's old

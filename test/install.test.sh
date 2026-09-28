@@ -17,7 +17,12 @@ ours() { [ "$(readlink -f "$1")" = "$(readlink -f "$2")" ] || { echo "  $1 is no
 export HOME="$TMP/home"
 mkdir -p "$HOME/.claude" "$TMP/fakebin"
 printf '#!/bin/sh\n' > "$TMP/fakebin/codex"; chmod +x "$TMP/fakebin/codex"
-export PATH="$TMP/fakebin:/usr/bin:/bin"
+# a PATH of only the tools needed, so this machine's own commands (a /usr/bin/pi,
+# a /usr/bin/goose) can't count as harnesses
+for t in bash sh env dirname readlink grep mkdir ln rm cat chmod touch rmdir head sed awk tr cut sort; do
+  ln -s "$(command -v "$t")" "$TMP/fakebin/$t"
+done
+export PATH="$TMP/fakebin"
 unset FILO_SKILL_DIRS FILO_BIN_DIR
 
 out="$("$INSTALL" 2>"$TMP/err")"
@@ -41,6 +46,21 @@ rm "$HOME/.local/bin/filo"; ln -s "$TMP/moved/bin/filo" "$HOME/.local/bin/filo" 
 "$INSTALL" >/dev/null 2>"$TMP/err"
 ours "$HOME/.claude/skills/filo" "$REPO"; ours "$HOME/.local/bin/filo" "$REPO/bin/filo"
 has "$(cat "$TMP/err")" "replaced: $HOME/.claude/skills/filo"
+
+# a harness whose skills dir can't be made (a dangling link) is skipped, not fatal
+mkdir -p "$HOME/.agents"; ln -s "$TMP/gone" "$HOME/.agents/skills"
+out="$("$INSTALL" 2>"$TMP/err")"
+assert "$out" "DONE skills=2 cli=$HOME/.local/bin/filo skipped=1"
+has "$(cat "$TMP/err")" "SKIP (cannot create): $HOME/.agents/skills"
+rm "$HOME/.agents/skills"; rmdir "$HOME/.agents"
+
+# a filo link to something that isn't a filo checkout is someone else's: kept by
+# install and by uninstall
+mkdir -p "$TMP/theirs"; rm "$HOME/.claude/skills/filo"; ln -s "$TMP/theirs" "$HOME/.claude/skills/filo"
+assert "$("$INSTALL" 2>/dev/null)" "DONE skills=1 cli=$HOME/.local/bin/filo skipped=1"
+assert "$("$INSTALL" --uninstall 2>/dev/null)" "DONE removed=2 skipped=1"
+assert "$(readlink "$HOME/.claude/skills/filo")" "$TMP/theirs"
+rm "$HOME/.claude/skills/filo"; "$INSTALL" >/dev/null 2>&1
 
 # anything else named filo is left alone and reported
 rm "$HOME/.codex/skills/filo"; mkdir "$HOME/.codex/skills/filo"                          # someone's own skill
