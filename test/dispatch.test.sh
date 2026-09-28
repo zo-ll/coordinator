@@ -87,4 +87,11 @@ for i in $(seq 20); do
   grep -q "^DISPATCHED p$i " "$TMP/p$i.out" || { echo "  p$i: $(cat "$TMP/p$i.out")"; exit 1; }
 done
 
+# a post-checkout hook that leaves a job running never holds the lock
+printf '#!/bin/sh\n(sleep 30 &)\n' > "$REPO/.git/hooks/post-checkout"; chmod +x "$REPO/.git/hooks/post-checkout"
+"$FILO" unit add h1 --kind chore --goal hook1 >/dev/null; "$FILO" unit add h2 --kind chore --goal hook2 >/dev/null
+"$FILO" dispatch h1 --role worker --brief "$TMP/brief" >/dev/null
+timeout 10 "$FILO" dispatch h2 --role worker --brief "$TMP/brief" >/dev/null || { echo "  dispatch waited on a hook's job"; exit 1; }
+rm "$REPO/.git/hooks/post-checkout"
+
 echo "  dispatch ok"

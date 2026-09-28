@@ -188,9 +188,10 @@ make_worktree() {
   fi
   mkdir -p "$(dirname "$WT_PATH")"
   # one worktree add at a time: concurrent adds in one repo read each other's
-  # half-written .git/worktrees entries and fail. The lock is held by flock
-  # for the git command only, so no agent ever inherits it.
-  local add=(flock "$RUN/worktree.lock" git -C "$REPO" worktree add -q)
+  # half-written .git/worktrees entries and fail. flock -o holds the lock
+  # itself and gives git none of it, so nothing git starts (a post-checkout
+  # hook's background job) can keep it; -w turns a stuck add into a refusal.
+  local add=(flock -o -w 120 "$RUN/worktree.lock" git -C "$REPO" worktree add -q)
   if git -C "$REPO" rev-parse --verify --quiet "refs/heads/$WT_BRANCH" >/dev/null 2>&1; then
     "${add[@]}" "$WT_PATH" "$WT_BRANCH" >&2 || { WT_ERR="git worktree add failed for $WT_BRANCH"; return 1; }
   else
