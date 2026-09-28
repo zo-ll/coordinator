@@ -375,11 +375,13 @@ everything the keys do: each frame records which item, "needs you" entry, or
 key owns which rows and columns as it builds its lines, and a click or wheel
 turn is hit-tested against that map. Prompts stay typed, with ✓ send / ✗
 cancel targets; drop still asks for "yes".
-↵ opens a unit full screen in six tabs, drawn by the same renderer: brief,
-findings (the critic's rounds, newest first), diff (a file summary, then the
-diff; a merged unit's merge commit), log (the merge's checks; it opens first
-when they failed), output (one round's agent output, following a running
-agent's tail), and history (the unit's events). `p` pipes a tab to `$PAGER`.
+↵ opens a unit full screen in six tabs (the Claude Design's drill-down,
+screens 3a-3f), drawn by the same renderer: brief (a section per field, what
+it depends on and blocks), findings (the critic's rounds, newest first),
+diff (a file summary, then the diff; a merged unit's merge commit), log (the
+merge's checks; it opens first when they failed), output (one round's agent
+output, following a running agent's tail), and history (the unit's events,
+in the feed's words). `p` pipes a tab to `$PAGER`.
 `--once` prints one frame for scripts and tests; `--open <unit> [--tab <tab>]`
 starts in a unit's view, and `--press` feeds it keys and mouse reports first.
 

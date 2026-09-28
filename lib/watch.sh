@@ -396,10 +396,11 @@ watch_frame() {
 
 # ---------------------------------------------------------------- unit view
 
-# One unit, full screen, in six tabs. VIEW is the open unit, TAB the tab
-# (1-6), TSCROLL the first line shown, TFOLLOW 1 while the output tab sticks
-# to the tail, OUT_IX which round's output (-1 always the newest; OUT_AT is
-# the one this frame shows).
+# One unit, full screen, in six tabs: the Claude Design's drill-down (screens
+# 3a-3f of "coord watch.dc.html"). VIEW is the open unit, TAB the tab (1-6),
+# TSCROLL the first line shown, TFOLLOW 1 while the output tab sticks to the
+# tail, OUT_IX which round's output (-1 always the newest; OUT_AT is the one
+# this frame shows). Every tab writes its own indented lines.
 TABS=(brief findings diff log output history)
 TABS_SHORT=(brief finds diff log out hist)   # under 60 columns
 
@@ -410,84 +411,224 @@ plain() { LC_ALL=C sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\xc2[\x80-\x9f]//g' | exp
 # out_logs <id>: the unit's agent output files, oldest first
 out_logs() { ls -tr "$RUN/log/$1".r*.*.log 2>/dev/null || true; }
 
-# findings <id>: the critic's rounds, newest first; earlier ones collapse to
-# their outcome
-findings() {
-  awk -F'\t' -v id="$1" '
-    function q(s) { gsub(/[\001-\037]/, " ", s); return s }
-    function m(k, t) { return "\001" k "\002" t "\003" }
-    $NF != "." { next }
-    { delete E; ran = ""
-      for (i = 1; i < NF; i++) { p = index($i, "="); k = substr($i, 1, p - 1); v = q(substr($i, p + 1))
-        if (k == "ran") ran = ran "\n" v; else E[k] = v } }
-    E["unit"] != id { next }
-    E["type"] == "dispatched" && E["role"] == "critic" { R[++n] = E["round"]; RES[n] = "reviewing"; next }
-    E["type"] == "finished" && E["role"] == "critic" { RES[n] = E["result"]; LV[n] = E["level"]; SUM[n] = E["summary"]; NOTE[n] = E["notes"]; RAN[n] = ran; next }
-    E["type"] == "converted" && n { RES[n] = "handback"; CONV[n] = E["reason"] }
-    E["type"] == "died" && E["slug"] ~ /critic$/ && n { RES[n] = "died" }
-    END {
-      if (!n) { print m("d", "no review yet"); exit }
-      for (i = n; i >= 1; i--) {
-        head = "round " R[i] " · " RES[i] (LV[i] == "" ? "" : " · evidence " LV[i])
-        if (i < n) { print m("d", head (SUM[i] == "" ? "" : " · " SUM[i])); continue }
-        print m("b", head)
-        if (SUM[i] != "") print "  " SUM[i]
-        if (NOTE[i] != "") print m("y", "  notes: " NOTE[i])
-        if (CONV[i] != "") print m("y", "  converted to a handback: " CONV[i])
-        if (RAN[i] != "") { print ""; print m("d", "  ran:"); k = split(substr(RAN[i], 2), c, "\n"); for (j = 1; j <= k; j++) print "    $ " c[j] }
-        if (n > 1) print ""
-      }
-    }' "$LOG"
+# EV_AWK: the start of an awk program over the event log (-v id=<unit>): each
+# complete event of that unit lands in E (repeated ran= fields in RAN,
+# newline-joined), t is its type; m() is markup, hm() a clock time, wrap()
+# prints words wrapped to width w after an indent
+EV_AWK='
+  function q(s) { gsub(/[\001-\037]/, " ", s); return s }
+  function m(k, s) { return "\001" k "\002" s "\003" }
+  function hm(s) { return strftime("%H:%M", s) }
+  function wrap(s, w, ind, ind2,   n, a, i, l) {
+    n = split(s, a, " "); l = ""
+    for (i = 1; i <= n; i++) {
+      if (l != "" && length(l) + 1 + length(a[i]) > w) { print ind l; l = a[i]; ind = ind2 }
+      else l = (l == "" ? a[i] : l " " a[i])
+    }
+    if (l != "") print ind l
+  }
+  BEGIN { EVL["none"] = "○○○"; EVL["typecheck"] = "●○○"; EVL["tests"] = "●●○"; EVL["live"] = "●●●" }
+  $NF != "." { next }
+  { delete E; RAN = ""
+    for (i = 1; i < NF; i++) { p = index($i, "="); k = substr($i, 1, p - 1); v = q(substr($i, p + 1))
+      if (k == "ran") RAN = RAN "\n" v; else E[k] = v } }
+  E["unit"] != id { next }
+  { t = E["type"] }
+'
+ev_awk() { local id=$1 prog=$2; shift 2; awk -F'\t' -v id="$id" -v w="$W_W" "$@" "$EV_AWK$prog" "$LOG"; }
+
+# brief_fields: one headed section per brief field: the ones the worker acts
+# on first, then the brief's others in its order
+brief_fields() {
+  local f fields=() order=(GOAL SCOPE REPRO ACCEPTANCE VERIFY) name body l x cmds=()
+  mapfile -t fields < <(brief "$U_BRIEF" fields 2>/dev/null || true)
+  body=$(brief "$U_BRIEF" get "" 2>/dev/null | plain || true)   # prose before the first field
+  [ -z "$body" ] || { fold -s -w $((W_W - 4)) <<< "$body" | sed 's/ *$//; s/^/   /'; echo; }
+  for f in "${fields[@]}"; do case " ${order[*]} TIMEBOX " in *" $f "*) ;; *) order+=("$f") ;; esac; done
+  for f in "${order[@]}"; do
+    body=$(brief "$U_BRIEF" get "$f" 2>/dev/null | plain) || continue
+    case $f in
+      ACCEPTANCE) name='Done when' ;; VERIFY) name=Checks ;;
+      *) name=${f//_/ }; name=${name,,}; name=${name^} ;;
+    esac
+    echo " $(m b "$name")"
+    case $f in
+      VERIFY)
+        mapfile -t cmds < <(brief "$U_BRIEF" verify 2>/dev/null | plain || true)
+        l=""; for x in "${cmds[@]}"; do l+="${l:+  ·  }$x"; done
+        if [ "$(( ${#l} + 3 ))" -le "$W_W" ]; then echo "   $l"; else printf '   %s\n' "${cmds[@]}"; fi ;;
+      ACCEPTANCE)
+        while IFS= read -r l; do
+          l=$(sed -E 's/^[[:space:]]*([-*·][[:space:]]*)?//' <<< "$l"); [ -n "$l" ] || continue
+          fold -s -w $((W_W - 6)) <<< "$l" | sed 's/ *$//' | awk 'NR == 1 { print "   · " $0; next } { print "     " $0 }'
+        done <<< "$body" ;;
+      *) fold -s -w $((W_W - 4)) <<< "$body" | sed 's/ *$//; s/^/   /' ;;
+    esac
+    echo
+  done
 }
 
-# diff_tab: a file summary, then the diff (a merged unit: its merge commit).
-# A worktree's new files join the diff through a scratch index that marks
-# them intent-to-add, so a few git calls cover any number of files.
+# 3a: the brief as the worker received it, then what it depends on and blocks
+brief_tab() {
+  local blocks="" row x deps
+  if [ -f "$U_BRIEF" ]; then brief_fields
+  else echo " $(m d 'no brief yet: the unit has not been dispatched')"; echo; fi
+  for row in "${UNITS[@]}"; do
+    IFS=$US read -r x _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ deps _ <<< "$row"
+    [[ ",$deps," != *",$VIEW,"* ]] || blocks+="${blocks:+, }$x"
+  done
+  deps=${U_DEPS//,/, }
+  echo " $(m b 'Depends on')  ${deps:-none}"
+  echo " $(m b 'Blocks')      ${blocks:-none}"
+  [ ! -f "$U_BRIEF" ] || { echo; echo " $(m d "Written by the coordinator at $(date -r "$U_BRIEF" +%H:%M).")"; }
+}
+
+# 3b: the critic's rounds, newest first; earlier rounds collapse to their
+# outcome (and what became of them: a failed merge, a note, a merge)
+findings_tab() {
+  ev_awk "$VIEW" '
+    t == "dispatched" && E["role"] == "critic" { n++; R[n] = E["round"]; RES[n] = "being reviewed"; next }
+    t == "finished" && E["role"] == "critic" && n {
+      RES[n] = E["result"] == "pass" ? "passed" : E["result"] == "handback" ? "sent back" : E["result"]
+      LV[n] = E["level"]; TS[n] = E["ts"]; SUM[n] = E["summary"]; NOTE[n] = E["notes"]; CMD[n] = RAN; next }
+    t == "converted" && n { RES[n] = "sent back"; OUT[n] = OUT[n] "\n" m("y", "↩") " the pass lacked evidence: " E["reason"] }
+    t == "died" && E["slug"] ~ /critic$/ && n { RES[n] = m("r", "the critic died") }
+    t == "verify_failed" && n { OUT[n] = OUT[n] "\n" m("r", "✗") " the merge re-ran the checks: exit " E["exit"] " " m("d", "(see 4 log)") }
+    t == "rejected" && n { OUT[n] = OUT[n] "\n" (E["by"] == "engine" ? m("r", "✗") " the merge conflicted with the base" : m("y", "↩") " you sent it back: \"" E["text"] "\"") }
+    t == "merged" && n { OUT[n] = OUT[n] "\n" m("g", "✓") " merged " m("d", substr(E["sha"], 1, 7)) }
+    END {
+      if (!n) { print " " m("d", "no review yet"); exit }
+      for (i = n; i >= 1; i--) {
+        e = LV[i] == "" ? "" : m("d", " · ") "evidence " EVL[LV[i]] " " LV[i]
+        print " " m("b", "Round " R[i]) "  " RES[i] e (TS[i] == "" ? "" : m("d", " · " hm(TS[i])))
+        if (i == n) {
+          if (SUM[i] != "") { print ""; wrap("\"" SUM[i] "\"", w - 4, "   ", "    ") }
+          if (CMD[i] != "") { print ""; print " " m("b", "Checks"); k = split(substr(CMD[i], 2), c, "\n"); for (j = 1; j <= k; j++) print "   $ " c[j] }
+          if (NOTE[i] != "") { print ""; print " " m("b", "Findings"); k = split(NOTE[i], c, / \| /); for (j = 1; j <= k; j++) wrap(c[j], w - 10, "   " m("y", "note") "  ", "         ") }
+          if (OUT[i] != "") print ""
+        }
+        k = split(substr(OUT[i], 2), c, "\n"); for (j = 1; j <= k; j++) print "   " c[j]
+        if (i > 1) print ""
+      }
+    }'
+}
+
+# 3c: a file summary, then the diff (a merged unit: its merge commit), one
+# "── path ──" rule per file. A worktree's new files join the diff through a
+# scratch index that marks them intent-to-add, so a few git calls cover any
+# number of files.
 diff_tab() {
-  local g=(git -c core.quotePath=false)
+  local g=(git -c core.quotePath=false) info
   if [ "$U_STATE" = merged ] && [ -n "$U_SHA" ]; then
-    g+=(-C "$REPO"); set -- "$U_SHA^1" "$U_SHA"
+    g+=(-C "$REPO"); set -- "$U_SHA^1" "$U_SHA"; info="merge commit ${U_SHA:0:7}"
   elif [ -d "$U_WT" ]; then
     # a copy of the worktree's own index keeps its stat cache: only changed files get hashed
     local -x GIT_INDEX_FILE="$W_TMP.index"
     cp "$(git -C "$U_WT" rev-parse --path-format=absolute --git-path index 2>/dev/null)" "$GIT_INDEX_FILE" 2>/dev/null \
       || { rm -f "$GIT_INDEX_FILE"; "${g[@]}" -C "$U_WT" read-tree HEAD 2>/dev/null || true; }
     "${g[@]}" -C "$U_WT" add -A -N 2>/dev/null || true
-    g+=(-C "$U_WT"); set -- HEAD
+    g+=(-C "$U_WT"); set -- HEAD; info="branch $U_BRANCH (round $U_ROUND)"
   else
-    m d 'no changes: no worktree yet'; echo; return 0
+    echo " $(m d 'no changes: no worktree yet')"; return 0
   fi
-  # the summary in one pass: "path  +a −d", new files marked; fails on no changes
   { "${g[@]}" diff --name-only --diff-filter=A "$@" 2>/dev/null || true; echo $'\001'
     "${g[@]}" diff --numstat "$@" 2>/dev/null || true; } > "$W_TMP.stat"
-  awk -F'\t' '
-    function m(k, t) { return "\001" k "\002" t "\003" }
+  # the summary; fails when there is nothing to show
+  awk -F'\t' -v w="$W_W" -v info="$(clean "$info")" '
+    function m(k, s) { return "\001" k "\002" s "\003" }
+    function lr(l, lv, r, rv,   g) { g = w - lv - rv; if (g < 1) g = 1; return l sprintf("%" g "s", "") r }
     $0 == "\001" { stat = 1; next }
     !stat { NEW[$0] = 1; next }
-    NF >= 3 { f = $3; gsub(/[\001-\037\177]/, " ", f); n++
-              print "  " m("b", f) "  " m("g", "+" $1) " " m("r", "−" $2) (($3 in NEW) ? m("d", " new") : "") }
-    END { if (!n) { print m("d", "no changes yet"); exit 1 } }' "$W_TMP.stat" || return 0
+    NF >= 3 {
+      f = $3; gsub(/[\001-\037\177]/, " ", f); n++
+      if ($1 == "-") { r = "binary"; rv = 6; rk = "d" }
+      else { A += $1; D += $2; r = m("g", "+" $1) ($3 in NEW || $2 == 0 ? "" : " " m("r", "−" $2)); rv = 1 + length($1) + ($3 in NEW || $2 == 0 ? 0 : 2 + length($2)) }
+      l = "   " f ($3 in NEW ? " " m("d", "(new)") : "")
+      ROW[n] = lr(l, 3 + length(f) + ($3 in NEW ? 6 : 0), r "  ", rv + 2)
+    }
+    END {
+      if (!n) { print " " m("d", "no changes yet"); exit 1 }
+      l = " " m("b", n " file" (n == 1 ? "" : "s")) "  " m("g", "+" A) " " m("r", "−" D)
+      print lr(l, 1 + length(n " file" (n == 1 ? "" : "s")) + 2 + length(A) + 1 + 2 + length(D), m("d", info) " ", length(info) + 1)
+      print ""
+      for (i = 1; i <= n; i++) print ROW[i]
+    }' "$W_TMP.stat" || return 0
   echo
-  { "${g[@]}" diff "$@" 2>/dev/null || true; } | plain \
-    | sed $'s/^diff --git .*/\001b\002&\003/; t; s/^+.*/\001g\002&\003/; t; s/^-.*/\001r\002&\003/'
+  { "${g[@]}" diff "$@" 2>/dev/null || true; } | plain | awk -v w="$W_W" '
+    function m(k, s) { return "\001" k "\002" s "\003" }
+    /^diff --git / { f = $0; sub(/^diff --git a\//, "", f); sub(/ b\/.*$/, "", f); h = " ── " f " "
+                     r = ""; for (i = length(h); i < w - 1; i++) r = r "─"; print m("d", h r); hdr = 1; next }
+    hdr && /^(index |--- |\+\+\+ |new file mode|deleted file mode|old mode|new mode|similarity index|rename from|rename to)/ { next }
+    /^Binary files/ { print " " m("d", $0); next }
+    /^@@/ { hdr = 0; print " " m("c", $0); next }
+    /^\+/ { print " " m("g", $0); next }
+    /^-/  { print " " m("r", $0); next }
+    /^\\/ { print " " m("d", $0); next }
+    { print " " $0 }'
+}
+
+# 3d: the engine's own merge checks: which round, when, how it ended
+log_tab() {
+  local f="$RUN/log/$VIEW.verify.log" head
+  [ -f "$f" ] || { echo " $(m d "the merge's checks haven't run")"; return 0; }
+  head=$(ev_awk "$VIEW" '
+    t == "dispatched" { r = E["round"] }
+    t == "verify_failed" { k = "f"; ts = E["ts"]; x = E["exit"]; rr = r }
+    t == "merged" { k = "m"; ts = E["ts"]; sha = substr(E["sha"], 1, 7); rr = r }
+    END {
+      if (k == "f") { print " " m("b", "Merge of round " rr) "  " hm(ts) m("d", " · ") m("r", "✗ failed") m("d", " · exit " x)
+                      print m("d", " exit " x " · sent back to the worker at " hm(ts)) }
+      else if (k == "m") { print " " m("b", "Merge of round " rr) "  " hm(ts) m("d", " · ") m("g", "✓ passed")
+                           print m("d", " merged as " sha) }
+      else { print " " m("b", "Merge") "  " m("d", "running"); print "" }
+    }')
+  head -n1 <<< "$head"; echo
+  plain < "$f" | awk '
+    function m(k, s) { return "\001" k "\002" s "\003" }
+    /^\$ / { print m("d", " " $0); next }
+    /FAIL|^E / { print " " m("r", $0); next }
+    { print " " $0 }'
+  echo; tail -n1 <<< "$head"
+}
+
+# 3e: one round's agent output under what it was: role, round, time, end
+output_tab() {
+  local f slug role r now
+  mapfile -t OUTS < <(out_logs "$VIEW")
+  [ "${#OUTS[@]}" -gt 0 ] || { echo " $(m d 'no output yet')"; return 0; }
+  OUT_AT=$OUT_IX
+  [ "$OUT_AT" -ge 0 ] && [ "$OUT_AT" -lt "${#OUTS[@]}" ] || OUT_AT=$(( ${#OUTS[@]} - 1 ))
+  f=${OUTS[OUT_AT]} slug=${f##*/}; slug=${slug%.log}; role=${slug##*.}; r=${slug#"$VIEW".r}; r=${r%%.*}
+  ev_awk "$VIEW" '
+    E["slug"] != slug { next }
+    t == "dispatched" { d = E["ts"]; tb = E["timebox"] }
+    t == "finished" { e = E["ts"]; how = "finished at " hm(e) " · " E["result"] }
+    t == "died" { e = E["ts"]; how = m("r", (E["reason"] == "timeout" ? "killed at its time limit" : "died") " at " hm(e)) }
+    END {
+      used = int(((e ? e : now) - d) / 60); lim = int((tb ? tb : 1800) / 60)
+      print " " m("b", role " · round " r) "  " used "m of " lim "m" m("d", " · ") (how == "" ? "running" : how)
+    }' -v slug="$slug" -v role="$role" -v r="$r" -v now="$NOW"
+  echo
+  plain < "$f" | sed 's/^/ /'
+  if [ "${#OUTS[@]}" -gt 1 ]; then
+    echo
+    local hint=""
+    [ "$OUT_AT" -eq 0 ] || hint="[ an earlier round"
+    [ "$OUT_AT" -ge $(( ${#OUTS[@]} - 1 )) ] || hint+="${hint:+ · }] a later one"
+    echo " $(m d "${#OUTS[@]} outputs for this unit: $hint")"
+  fi
+}
+
+# 3f: the unit's story, oldest first, in the feed's words
+history_tab() {
+  awk -F'\t' -v id="$VIEW" 'index($0, "\tunit=" id "\t")' "$LOG" | awk -f "$SKILL/lib/watch.awk" \
+    | awk -F'\t' '$1 == "F" { print " \001d\002" strftime("%H:%M", $2) "\003  " $3; n++ } END { if (!n) print " \001d\002no events yet\003" }'
 }
 
 # tab_body <tab>: the tab's lines, as markup
 tab_body() {
-  local id=$VIEW l
   case $1 in
-    1) echo "$(m d "written by the coordinator · $(date -r "$U_BRIEF" '+%Y-%m-%d %H:%M' 2>/dev/null || echo 'no brief yet')")"; echo
-       [ ! -f "$U_BRIEF" ] || plain < "$U_BRIEF" ;;
-    2) findings "$id" ;;
-    3) diff_tab "$id" ;;
-    4) if [ -f "$RUN/log/$id.verify.log" ]; then plain < "$RUN/log/$id.verify.log"
-       else m d "the merge's checks haven't run"; echo; fi ;;
-    5) mapfile -t OUTS < <(out_logs "$id")
-       if [ "${#OUTS[@]}" -eq 0 ]; then m d 'no output yet'; echo; return 0; fi
-       OUT_AT=$OUT_IX
-       [ "$OUT_AT" -ge 0 ] && [ "$OUT_AT" -lt "${#OUTS[@]}" ] || OUT_AT=$(( ${#OUTS[@]} - 1 ))
-       plain < "${OUTS[OUT_AT]}" ;;
-    6) cmd_log "$id" | plain ;;
+    1) brief_tab ;; 2) findings_tab ;; 3) diff_tab ;; 4) log_tab ;; 5) output_tab ;; 6) history_tab ;;
   esac
 }
 
@@ -501,19 +642,29 @@ open_unit() {
 set_tab() { TAB=$1 TSCROLL=0 TFOLLOW=1; }
 scroll() { TSCROLL=$((TSCROLL + $1)); [ "$TSCROLL" -ge 0 ] || TSCROLL=0; TFOLLOW=0; }
 
-# unit_frame <width> <height>: the open unit: header, tabs, the tab's lines
+# unit_frame <width> <height>: the open unit: "esc ‹" and where it stands, its
+# goal, the tabs, the tab's lines. HIT rows: back, tabs, tab; TAB_HIT has
+# each tab's columns.
 unit_frame() {
-  local w=$1 h=$2 id=$VIEW row="" i t sp total rows max body=() f="$W_TMP.tab" right
+  local w=$1 h=$2 id=$VIEW row="" i t pad sep it c total rows max body=() f="$W_TMP.tab" ind=""
   watch_gather || true
   unit_row "$id" || { VIEW=""; watch_frame "$w" "$h"; return; }
   for row in "${UNITS[@]}"; do [ "${row%%"$US"*}" = "$id" ] && break; done
-  body+=("$(lr " $(glyph "$U_STATE") $(m b "$id") $(m d "· $U_KIND · round $U_ROUND ·") $(sentence "$row")" "$(m d "$(printf '%(%H:%M:%S)T' "$NOW")") " "$w")")
-  TABBAR=" "
+  HIT[0]=back
+  local left right
+  left=" $(m d 'esc ‹')  $(m b "$id")  $(m d "$U_KIND · round $U_ROUND")"
+  right="$(glyph "$U_STATE") $(sentence "$row") "   # the sentence, or just the state when it won't fit
+  [ $(( $(vis "$left") + $(vis "$right") )) -lt "$w" ] || right="$(glyph "$U_STATE") $(m y "$U_STATE") "
+  body+=("$(lr "$left" "$right" "$w")")
+  body+=("           $(m d "$(clean "$U_GOAL")")" '')
+  TABBAR=" " TAB_HIT=()
   for i in 1 2 3 4 5 6; do
-    t=${TABS[i - 1]} sp='  '; [ "$w" -ge 60 ] || t=${TABS_SHORT[i - 1]} sp=' '
-    if [ "$i" = "$TAB" ]; then TABBAR+="$(m k "$i")$(m I " $t ")${sp:1}"; else TABBAR+="$(m k "$i") $t$sp"; fi
+    t=${TABS[i - 1]} pad=' ' sep=''; [ "$w" -ge 60 ] || t=${TABS_SHORT[i - 1]} pad='' sep=' '
+    it="$pad$i $t$pad"; c=$(( $(vis "$TABBAR") + 1 ))
+    if [ "$i" = "$TAB" ]; then TABBAR+=$(m I "$it"); else TABBAR+="$pad$(m d "$i") $t$pad"; fi
+    TAB_HIT+=("$c $((c + ${#it} - 1)) $i"); TABBAR+=$sep
   done
-  HIT[1]=tabs; body+=("$TABBAR")
+  HIT[3]=tabs; body+=("$TABBAR")
   tab_body "$TAB" > "$f"
   total=$(wc -l < "$f"); rows=$(( h - 3 - ${#body[@]} - 1 )); VIEW_ROWS=$rows
   max=$(( total > rows ? total - rows : 0 ))
@@ -521,18 +672,15 @@ unit_frame() {
   if [ "$TAB" = 5 ] && [ -n "$U_OWES" ] && [ "$TFOLLOW" = 1 ] && [ "$OUT_IX" -lt 0 ]; then TSCROLL=$max; fi
   [ "$TSCROLL" -le "$max" ] || TSCROLL=$max
   [ "$TSCROLL" -lt "$max" ] || [ "$TAB" != 5 ] || TFOLLOW=1
-  right=""
-  [ "$TAB" != 5 ] || [ "${#OUTS[@]}" -eq 0 ] || right="${OUTS[OUT_AT]##*/} · "
-  [ "$total" -le "$rows" ] || right+="$((TSCROLL + 1))–$((TSCROLL + rows < total ? TSCROLL + rows : total)) of $total"
-  right=${right% · }
-  body+=("$(rule "${TABS[TAB - 1]}" "${right:+$(m d "$right")}" "$w")")
-  while IFS= read -r t; do HIT[${#body[@]}]=tab; body+=(" $t"); done < <(sed -n "$((TSCROLL + 1)),$((TSCROLL + rows))p" "$f")
+  [ "$total" -le "$rows" ] || ind=" $((TSCROLL + 1))–$((TSCROLL + rows < total ? TSCROLL + rows : total)) of $total ─"
+  body+=("$(m d "$(rep ─ $((w - ${#ind})))$ind")")
+  while IFS= read -r t; do HIT[${#body[@]}]=tab; body+=("$t"); done < <(sed -n "$((TSCROLL + 1)),$((TSCROLL + rows))p" "$f")
   FRAME=("${body[@]:0:$((h - 3))}")
   local pk=""
   [ "$U_STATE" != passed ] || pk="$(m k a) approve  $(m k r) reject  "
   [ "$TAB" != 3 ] || pk+="$(m k n/N) file  "
   [ "$TAB" != 5 ] || pk+="$(m k '[/]') round  "
-  KEYS=" $pk$(m k 1-6) tab  $(m k j/k) scroll  $(m k p) pager  $(m k esc) back  $(m k q) quit"
+  KEYS=" $(m k 1-6) tab  $(m k j/k) scroll  $(m k esc) back  $pk$(m k p) pager"
 }
 
 # view_key <key>: the unit view's own keys
@@ -546,8 +694,8 @@ view_key() {
     k|UP)   scroll -1 ;;
     ' ')    scroll "$(( ${VIEW_ROWS:-20} - 1 ))" ;;
     n|N) [ "$TAB" = 3 ] || return 0
-         if [ "$1" = n ]; then l=$(grep -n $'^\001b\002diff --git' "$W_TMP.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 > s { print; exit }')
-         else l=$(grep -n $'^\001b\002diff --git' "$W_TMP.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 < s { l = $1 } END { print l }'); fi
+         if [ "$1" = n ]; then l=$(grep -n $'^\001d\002 ── ' "$W_TMP.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 > s { print; exit }')
+         else l=$(grep -n $'^\001d\002 ── ' "$W_TMP.tab" | cut -d: -f1 | awk -v s="$TSCROLL" '$1 - 1 < s { l = $1 } END { print l }'); fi
          [ -z "$l" ] || { TSCROLL=$((l - 1)) TFOLLOW=0; } ;;
     '['|']') [ "$TAB" = 5 ] || return 0
          mapfile -t OUTS < <(out_logs "$VIEW")
@@ -707,8 +855,8 @@ Mouse
   click an item to select it, the selected one again to open it; click a
   "needs you" entry to jump to it, a unit in up next or done to open it,
   a key in the bottom bar to press it. The wheel moves the selection over
-  WORK and scrolls RECENT back. In a unit's view, click a tab to show it;
-  the wheel scrolls it.
+  WORK and scrolls RECENT back. In a unit's view, click a tab to show it
+  or "esc ‹" to go back; the wheel scrolls it.
   In a prompt: ↵ or ✓ send sends, esc or ✗ cancel cancels. Shift-drag
   selects text in most terminals while watch has the mouse.
 
@@ -736,7 +884,8 @@ on_mouse() {
   fi
   [ "$MY" -le "${#FRAME[@]}" ] || return 0
   case $MB:${HIT[MY - 1]:-} in
-    0:tabs) mapfile -t hit < <(hits "$TABBAR" k); k=$(at "$MX" "${hit[@]}") && set_tab "$k" ;;
+    0:back) [ "$MX" -gt 7 ] || VIEW="" W_REPLY="" ;;
+    0:tabs) k=$(at "$MX" "${TAB_HIT[@]}") && set_tab "$k" ;;
     64:tab) scroll -3 ;;
     65:tab) scroll 3 ;;
     0:queue) mapfile -t hit < <(hits "${FRAME[MY - 1]}" u); k=$(at "$MX" "${hit[@]}") && open_unit "$k" ;;

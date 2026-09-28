@@ -66,7 +66,7 @@ has "$(frame 80 --press "$(click 3 "$((r + 1))")")" "▸◐ busy1"              
 hasnt "$(frame 80 --press "$(click 3 "$r" 0 | tr M m)")" "▸◐ busy1"         # a release does nothing
 hasnt "$(frame 80 --press "$(click 3 "$r" 2)")" "▸◐ busy1"                  # nor another button
 has "$(frame 80 --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")")" "o reopen  x drop"
-has "$(frame 80 --press "$(click 3 "$r")$(click 3 "$r")")" "◐ busy1 · feature · round 1"  # again opens
+has "$(frame 80 --press "$(click 3 "$r")$(click 3 "$r")")" "esc ‹  busy1  feature · round 1"  # again opens
 has "$(PAGER='head -n1' frame 80 --press "$(click "$(col_of "$bar" '? keys')" 70)")" "coord watch keys"
 has "$(frame 80 --press "$(click 3 "$r" 65)$(click 3 "$r" 65)")" "▸◐ busy1"  # wheel moves the selection
 has "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)")" "↑ 1 newer" # and scrolls the feed
@@ -88,40 +88,59 @@ has "$("$COORD" log)" "msg - hi there"
 has "$( { click 65 69; } | frame 80 --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")x")" "x drop"
 assert "$(state_of dead1)" blocked
 
-# the unit view: ↵ opens the selected unit on its brief, in six tabs
+# the unit view (the design's 3a-3f): ↵ opens the selected unit on its brief
 out="$(frame 80 --press $'\n')"
-has "$out" "▲ pass1 · feature · round 1 · passed · needs your approval"
-has "$out" "1 brief  2 findings  3 diff  4 log  5 output  6 history"
-has "$out" "written by the coordinator"
-has "$out" "GOAL: file.txt gains a line"
-has "$out" "a approve  r reject  1-6 tab"
+has "$out" "esc ‹  pass1  feature · round 1"
+has "$out" "▲ passed · needs your approval"
+has "$out" "           passes review"                                           # its goal
+has "$out" "  1 brief  2 findings  3 diff  4 log  5 output  6 history"
+has "$out" "1-6 tab  j/k scroll  esc back  a approve  r reject  p pager"
 view() { "$COORD" watch --once --width 80 --height "${H:-70}" --open "$@"; }
-out="$(view pass1 --tab findings)"; has "$out" "round 1 · pass · evidence tests"; has "$out" '$ test -f file.txt'
-out="$(view pass1 --tab diff)"; has "$out" "file.txt  +1 −0"; has "$out" "+change by pass1.r1.worker"
+# 3a brief: a headed section per field, deps, what it blocks, who wrote it
+out="$(view pass1)"
+has "$out" $' Goal\n   file.txt gains a line'
+has "$out" $' Done when\n   · file.txt has more than one line'
+has "$out" $' Checks\n   test "$(wc -l < file.txt)" -gt 1'
+has "$out" " Depends on  none"; has "$out" " Blocks      none"
+has "$(view busy1)" " Blocks      next1"; has "$(view next1)" " Depends on  busy1"
+has "$out" "Written by the coordinator at"
+# 3b findings: newest round first, its summary, checks and notes
+out="$(view pass1 --tab findings)"
+has "$out" " Round 1  passed · evidence ●●○ tests · "
+has "$out" '   "looks right"'; has "$out" $' Checks\n   $ test -f file.txt'
+# 3c diff: the summary, then a rule per file, no git headers
+out="$(view pass1 --tab diff)"
+has "$out" " 1 file  +1 −0"; has "$out" "branch coord/pass1 (round 1)"
+has "$out" " ── file.txt ──"; has "$out" " +change by pass1.r1.worker"; hasnt "$out" "diff --git"; hasnt "$out" "index "
 has "$(view pass1 --tab log)" "the merge's checks haven't run"
-has "$(view pass1 --tab output)" "pass1.r1.critic.log"                       # the newest round first
-has "$(view pass1 --tab output --press '[')" "pass1.r1.worker.log"           # [ ] switch rounds
-out="$(view pass1 --tab history)"; has "$out" "unit_added pass1"; has "$out" "finished pass1 pass1.r1.critic pass"
-has "$(view pass1 --press 3)" "─ diff ─"                                   # 1-6 pick a tab
-has "$(view pass1 --press $'\e[C')" "─ findings ─"                          # → next
-has "$(view pass1 --press $'\e[D')" "─ history ─"                           # ← previous, wrapping
+# 3e output: the newest round, under its role, round and end
+out="$(view pass1 --tab output)"; has "$out" " critic · round 1  0m of 60m · finished at "; has "$out" "[ an earlier round"
+has "$(view pass1 --tab output --press '[')" " worker · round 1"               # [ ] switch rounds
+# 3f history: the feed's sentences, oldest first
+out="$(view pass1 --tab history)"
+has "$out" "coordinator added pass1 · feature"; has "$out" "critic passed pass1 · round 1 · tests"
+[ "$(grep -n 'coordinator added pass1' <<< "$out" | cut -d: -f1)" -lt "$(grep -n 'critic passed pass1' <<< "$out" | cut -d: -f1)" ] || { echo "  history not oldest first"; exit 1; }
+has "$(view pass1 --press 3)" " ── file.txt ──"                           # 1-6 pick a tab
+has "$(view pass1 --press $'\e[C')" " Round 1  passed"                      # → next
+has "$(view pass1 --press $'\e[D')" "coordinator added pass1"               # ← previous, wrapping
 has "$(view pass1 --press $'\e')" "─ WORK "                                  # esc: back to the main screen
-has "$(PAGER='head -n1' view pass1 --press p)" "written by the coordinator"    # p: the tab in $PAGER
+has "$(view pass1 --press "$(click 3 1)")" "─ WORK "                          # so does a click on "esc ‹"
+has "$(PAGER='head -n1' view pass1 --press p)" "Please do the thing."          # p: the tab in $PAGER
 # a running agent's output follows its tail until you scroll up
 for i in $(seq -w 1 50); do echo "line $i"; done >> .coordinator/log/busy1.r1.worker.log
 has "$(H=14 view busy1 --tab output)" "line 50"
 hasnt "$(H=14 view busy1 --tab output --press k)" "line 50"
-has "$(H=14 view busy1 --tab output --press k)" "of 51"
+has "$(H=14 view busy1 --tab output --press k)" "of 53"
 # the newest output stays the newest: a new round's log takes over, still followed
 echo "critic here" > .coordinator/log/busy1.r1.critic.log
-has "$(H=14 view busy1 --tab output)" "busy1.r1.critic.log"
+has "$(H=14 view busy1 --tab output)" "critic · round 1"
 has "$(H=14 view busy1 --tab output --press '[')" "line 01"                  # an older round starts at its top
 has "$(H=14 view busy1 --tab output --press '[]')" "critic here"             # ] past the end: the newest again
 rm .coordinator/log/busy1.r1.critic.log
 # new files join the diff whatever their names, and nothing reaches stderr
 printf 'a\nb\n' > .coordinator/worktrees/pass1/café.txt
 out="$(view pass1 --tab diff 2>"$TMP/err")"
-has "$out" "café.txt  +2 −0 new"; has "$out" "+++ b/café.txt"; assert "$(cat "$TMP/err")" ""
+has "$out" "café.txt (new)"; has "$out" " ── café.txt ──"; has "$out" " +b"; assert "$(cat "$TMP/err")" ""
 assert "$(git -c core.quotePath=false -C .coordinator/worktrees/pass1 status --short café.txt)" "?? café.txt"   # the real index untouched
 rm .coordinator/worktrees/pass1/café.txt
 assert "$(ls .coordinator/watch.* 2>/dev/null || true)" ""                   # its scratch files leave with it
@@ -130,13 +149,13 @@ has "$("$COORD" watch --once --width 44 --height 30 --open pass1)" "6 hist"
 refuses "--tab is one of 1-6" "$COORD" watch --once --open pass1 --tab nope
 refuses 'no unit "nope"' "$COORD" watch --once --open nope
 # mouse: a tab name switches, the wheel scrolls, a unit in done opens its view
-bar=$(sed -n 2p <<< "$(view pass1)")
-has "$(view pass1 --press "$(click "$(col_of "$bar" diff)" 2)")" "─ diff ─"
+bar=$(sed -n 4p <<< "$(view pass1)")
+has "$(view pass1 --press "$(click "$(col_of "$bar" diff)" 4)")" " ── file.txt ──"
 hasnt "$(H=14 view busy1 --tab output --press "$(click 3 8 64)")" "line 50"
 done_line=$(frame 80 | grep -F 'done     ')
 out="$(frame 80 --press "$(click "$(col_of "$done_line" done1)" "$(row_of 'done     ')")")"
-has "$out" "✓ done1 · chore · round 1 · merged"
-has "$(view done1 --tab diff)" "+change by done1.r1.worker"                   # a merged unit: its merge commit
+has "$out" "esc ‹  done1  chore · round 1"
+out="$(view done1 --tab diff)"; has "$out" "+change by done1.r1.worker"; has "$out" "merge commit"   # a merged unit: its merge commit
 
 # keys: approve the selected passed unit -> approved and merged
 has "$(frame 80 --press a)" "› ok: MERGED pass1"
@@ -170,6 +189,9 @@ sed 's/-gt 1/-gt 99/' "$TMP/brief" > "$TMP/strict"
 FAKE_CRITIC=notepass "$COORD" dispatch strict --role critic >/dev/null; wait_for is_state strict passed
 "$COORD" approve strict >/dev/null; "$COORD" merge strict >/dev/null 2>&1 || true
 assert "$(state_of strict)" handback
-out="$(view strict)"; has "$out" "─ log ─"; has "$out" "-gt 99"
+out="$(view strict)"
+has "$out" " Merge of round 1  "; has "$out" "✗ failed · exit 1"; has "$out" '$ test "$(wc -l < file.txt)" -gt 99'
+has "$out" "exit 1 · sent back to the worker at"
+has "$(view strict --tab findings)" "✗ the merge re-ran the checks: exit 1 (see 4 log)"
 
 echo "  watch ok"
