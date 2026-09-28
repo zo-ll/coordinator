@@ -77,4 +77,14 @@ wait_for test -f "$FAKE_DIR/fake2.r1.r1.worker"
 "$FILO" unit add r2 --kind feature --goal "odd" --risk bogus >/dev/null
 refuses "REFUSED r2 dispatched: no routing.bogus" "$FILO" dispatch r2 --role worker --brief "$TMP/brief"
 
+# many dispatches at once: each gets its worktree (git worktree add is not
+# safe to run concurrently in one repo, so the engine takes turns)
+brief "$TMP/brief"
+for i in $(seq 20); do "$FILO" unit add p$i --kind chore --goal "parallel $i" >/dev/null; done
+for i in $(seq 20); do "$FILO" dispatch p$i --role worker --brief "$TMP/brief" > "$TMP/p$i.out" 2>&1 & done
+wait
+for i in $(seq 20); do
+  grep -q "^DISPATCHED p$i " "$TMP/p$i.out" || { echo "  p$i: $(cat "$TMP/p$i.out")"; exit 1; }
+done
+
 echo "  dispatch ok"
