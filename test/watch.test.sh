@@ -74,6 +74,7 @@ hasnt "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)$(click 3 "$(ro
 # a terminal without SGR sends ESC [ M and three raw bytes: never keys
 # (wheel-down's button byte is "a")
 frame 80 --press $'\e[Ma!!' >/dev/null; assert "$(state_of pass1)" passed
+frame 80 --press $'\e[Ma\xe2\x30\e[Ma\xe2\x30' >/dev/null; assert "$(state_of pass1)" passed  # column 194: bytes, not UTF-8
 # a narrow prompt keeps its ✓ send / ✗ cancel targets: cancel, then ↵ would drop
 { printf 'yes'; click 40 69; echo; } | "$COORD" watch --once --width 44 --height 70 \
   --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")x" >/dev/null

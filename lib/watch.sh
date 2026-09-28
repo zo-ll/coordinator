@@ -431,7 +431,8 @@ read_key() {
   done
   # a terminal with mouse mode but not SGR sends ESC [ M and three raw bytes:
   # read them here, or they would land as keys (wheel-down is "a")
-  [ "$s" != M ] || IFS= read -rsn3 -u "$1" -t 0.01 c || true
+  # (as bytes: past column 162 one reads as the start of a UTF-8 character)
+  [ "$s" != M ] || LC_ALL=C IFS= read -rsn3 -u "$1" -t 0.01 c || true
   case $s in A) KEY=UP ;; B) KEY=DOWN ;; '<'*[Mm]) KEY="M:${s#<}" ;; *) KEY=NONE ;; esac
 }
 
@@ -454,7 +455,7 @@ ask() {
   local p=$1 text="" line shown room act r
   ANSWER=""; r="$(m k '✓ send')  $(m k '✗ cancel') "
   # the targets never get cut: on a narrow screen the prompt gives way
-  room=$(( W_W - $(vis "$r") - 2 )); [ "$(vis "$p")" -le "$room" ] || p=$(fit "$p" "$room")
+  room=$(( W_W - $(vis "$r") - 8 )); [ "$(vis "$p")" -le "$room" ] || p=$(fit "$p" "$room")
   while :; do
     room=$(( W_W - $(vis "$p") - $(vis "$r") - 1 )); [ "$room" -ge 1 ] || room=1
     shown=$(clean "$text")
