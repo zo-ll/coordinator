@@ -195,6 +195,8 @@ out="$(view strict)"
 has "$out" " Merge of round 1  "; has "$out" "✗ failed · exit 1"; has "$out" '$ test "$(wc -l < file.txt)" -gt 99'
 has "$out" "exit 1 · sent back to the worker at"
 has "$(view strict --tab findings)" "✗ the merge re-ran the checks: exit 1 (see 4 log)"
+touch -d '+5 seconds' .coordinator/log/strict.verify.log                     # a new merge rewrote the log
+has "$(view strict --tab log)" " Merge  running"
 
 # DEL and C1 controls in event text never reach the terminal
 "$COORD" msg strict $'odd\x7f\xc2\x9b31m text' >/dev/null

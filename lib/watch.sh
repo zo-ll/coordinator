@@ -586,12 +586,15 @@ log_tab() {
     t == "verify_failed" { k = "f"; ts = E["ts"]; x = E["exit"]; rr = r }
     t == "merged" { k = "m"; ts = E["ts"]; sha = substr(E["sha"], 1, 7); rr = r }
     END {
+      # the merge rewrites the log as it starts: a log newer than the last result
+      # (an auto-merge records no approval) is a merge still running
+      if (k != "" && lm > int(ts) + 1) k = ""
       if (k == "f") { print " " m("b", "Merge of round " rr) "  " hm(ts) m("d", " · ") m("r", "✗ failed") m("d", " · exit " x)
                       print m("d", " exit " x " · sent back to the worker at " hm(ts)) }
       else if (k == "m") { print " " m("b", "Merge of round " rr) "  " hm(ts) m("d", " · ") m("g", "✓ passed")
                            print m("d", " merged as " sha) }
       else { print " " m("b", "Merge") "  " m("d", "running"); print "" }
-    }')
+    }' -v lm="$(stat -c %Y "$f")")
   head -n1 <<< "$head"; echo
   plain < "$f" | awk '
     function m(k, s) { return "\001" k "\002" s "\003" }
