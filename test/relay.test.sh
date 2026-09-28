@@ -102,6 +102,22 @@ rp=$(cat "$REPO/.filo/relay.pid")
 assert "$("$FILO" relay --stop)" "STOPPED relay pid=$rp"
 kill -0 "$rp" 2>/dev/null && { echo "  relay still alive"; exit 1; }
 assert "$("$FILO" relay --stop)" "RELAY none running"
+# a pidfile left by a killed relay names someone else's process: never theirs to stop
+sleep 300 & bystander=$!
+echo "$bystander" > "$REPO/.filo/relay.pid"
+assert "$("$FILO" relay --stop)" "RELAY none running"
+kill -0 "$bystander" || { echo "  --stop killed a bystander"; exit 1; }
+kill "$bystander"; [ ! -e "$REPO/.filo/relay.pid" ] || { echo "  stale pidfile kept"; exit 1; }
+# stopped during a coordinator turn: the turn finishes and is acked, then the relay leaves
+printf '#!/usr/bin/env bash\nsleep 8\n' > "$TMP/bin/slow-resume"; chmod +x "$TMP/bin/slow-resume"
+"$FILO" msg - "wake up" >/dev/null
+FILO_RESUME="slow-resume|__BATCH__" "$FILO" relay --interval 0.2 >/dev/null 2>&1 &
+wait_for bash -c '"$FILO" status | grep -q "inflight=[1-9]"'
+rp=$(cat "$REPO/.filo/relay.pid")
+assert "$("$FILO" relay --stop)" "STOPPING relay pid=$rp (after the coordinator's turn in flight)"
+wait_for bash -c "! kill -0 $rp 2>/dev/null"
+has "$("$FILO" status | head -n1)" "inflight=0"
+has "$("$FILO" log | tail -n1)" "acked"
 
 # --- --detach restarts this run's relay once, and only once ---
 echo "sess-1" > "$REPO/.filo/session"

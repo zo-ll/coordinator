@@ -6,6 +6,9 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
 ROOT="$(cd "$TEST_DIR/.." && pwd)"
 export FILO="$ROOT/bin/filo"
 TMP="$(mktemp -d)"
+# never read this machine's git config either: a global gitignore would hide
+# what a test means to see
+export GIT_CONFIG_GLOBAL=/dev/null XDG_CONFIG_HOME="$TMP/xdg"
 # never read this machine's harness state: no codex model list, no skills
 export CODEX_HOME="$TMP/codex-home" CLAUDE_CONFIG_DIR="$TMP/claude-home" FILO_ROLES="$TMP/roles.conf"
 cleanup() {

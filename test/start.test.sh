@@ -27,6 +27,12 @@ git check-ignore -q .claude/settings.local.json || { echo "  claude settings not
 assert "$(git status --porcelain --untracked-files=all | grep -v staged.txt)" $'?? .filo/.gitignore\n?? .filo/config.conf'   # only what's yours to commit
 grep -qxF /.claude/settings.local.json "$(git rev-parse --git-common-dir)/info/exclude"
 
+# run from a subdirectory (a package in a monorepo): the settings file is still excluded
+mono="$TMP/mono"; mkdir -p "$mono/app"; git init -q "$mono"
+(cd "$mono/app" && FILO_EVENTS="$mono/app/.filo/events.log" "$FILO" start --session sub --no-relay >/dev/null)
+[ -f "$mono/app/.claude/settings.local.json" ] || { echo "  no settings in the subdirectory"; exit 1; }
+git -C "$mono" check-ignore -q app/.claude/settings.local.json || { echo "  subdirectory settings not excluded"; exit 1; }
+
 # starts a detached relay for this run, pinning the resume recipe
 out="$("$FILO" start --session s2)"
 has "$out" "RELAY pid="

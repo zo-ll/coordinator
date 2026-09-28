@@ -684,7 +684,8 @@ merge_locked() {
 # The scheduler: the only thing that turns events into coordinator turns.
 #   relay [--once] [--interval N] [--max-attempts N] [--backoff N]
 #   relay --detach   (re)start this run's relay in the background -> RELAY pid=<pid>
-#   relay --stop     stop it -> STOPPED relay pid=<pid> | RELAY none running
+#   relay --stop     stop it -> STOPPED relay pid=<pid> | STOPPING relay pid=<pid>
+#                    (after the coordinator's turn in flight) | RELAY none running
 # One relay per run. Each tick: report launches that died (exited) or ran
 # past their timebox (SIGTERM, SIGKILL after timebox.grace, then died
 # timeout; a second death in a round blocks the unit); then write every
@@ -692,13 +693,18 @@ merge_locked() {
 # coordinator with "WAKE batch=<path>", and ack when its turn exits.
 cmd_relay() {
   parse_args relay "interval max-attempts backoff" "" "once detach stop" "$@"
-  if [ "${F[stop]:-0}" = 1 ]; then   # the relay alone: a coordinator turn in flight finishes on its own
+  if [ "${F[stop]:-0}" = 1 ]; then
+    # the lock, not the pidfile, says whether a relay runs: a pidfile left by a
+    # killed relay may name someone else's process by now
     local rp i; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
-    alive "$rp" || { echo "RELAY none running"; return 0; }
+    relay_running || { rm -f "$RUN/relay.pid"; echo "RELAY none running"; return 0; }
+    alive "$rp" || { fail 1 'relay: %s is held but %s names no live process' "$RUN/relay.lock" "$RUN/relay.pid"; return; }
     kill -TERM "$rp" 2>/dev/null || true
-    for i in $(seq 50); do alive "$rp" || break; sleep 0.1; done
-    alive "$rp" && { fail 1 'relay: pid %s did not stop' "$rp"; return; }
-    echo "STOPPED relay pid=$rp"; return 0
+    for i in $(seq 50); do relay_running || break; sleep 0.1; done
+    # a turn in flight finishes (and is acked) first: the relay leaves after it
+    if relay_running; then echo "STOPPING relay pid=$rp (after the coordinator's turn in flight)"
+    else echo "STOPPED relay pid=$rp"; fi
+    return 0
   fi
   if [ "${F[detach]:-0}" = 1 ]; then   # (re)start this run's relay in the background
     local rp; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
@@ -717,14 +723,16 @@ cmd_relay() {
   pidfile="$RUN/relay.pid"
   echo "$$" > "$pidfile"
   trap 'rm -f "'"$pidfile"'"' EXIT
-  trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
+  # TERM (relay --stop) stops after the turn in flight, once it's acked; bash
+  # runs the trap only when that foreground turn exits
+  RELAY_STOP=0; trap 'RELAY_STOP=1' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
 
   # a batch claimed by a relay that crashed is ours to redeliver
   nack_stranded() { local s; s=$(model inflight); [ -z "$s" ] || ev type=nacked seqs="$s"; }
   commit nack_stranded || true
 
   declare -gA TERMED=()
-  while :; do
+  while [ "$RELAY_STOP" = 0 ]; do
     reap
     BATCH="" SEQS=""
     commit claim || { fail 1 'relay: cannot claim a batch'; return; }
@@ -732,7 +740,11 @@ cmd_relay() {
     deliver "$attempts" "$backoff" || return 1
     [ "$once" = 1 ] && return 0
   done
+  return 0
 }
+
+# relay_running: this run's relay holds its lock
+relay_running() { ! flock -n "$RUN/relay.lock" true 2>/dev/null; }
 
 older() { awk -v a="$1" -v b="$2" -v c="$3" 'BEGIN { exit !(a - b > c) }'; }
 
@@ -845,6 +857,10 @@ deliver() {
   for (( attempt = 1; ; attempt++ )); do
     if resume "WAKE batch=$BATCH"; then
       one_event type=acked seqs="$SEQS" batch="$BATCH" || true
+      return 0
+    fi
+    if [ "$RELAY_STOP" = 1 ]; then   # stopping: hand the events back for the next relay
+      one_event type=nacked seqs="$SEQS" batch="$BATCH" || true
       return 0
     fi
     if [ "$attempt" -ge "$max" ]; then
@@ -1018,7 +1034,7 @@ cmd_start() {
   elif [ ! -e "$cs" ]; then
     mkdir -p "$(dirname "$cs")"
     printf '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  }\n}\n' > "$cs"
-    excluded /.claude/settings.local.json
+    excluded "/$(git -C "$REPO" rev-parse --show-prefix 2>/dev/null).claude/settings.local.json"   # anchored where filo runs
   fi
 
   [ "${F[no-relay]:-0}" = 1 ] && return 0
