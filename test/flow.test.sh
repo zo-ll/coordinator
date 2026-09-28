@@ -34,7 +34,7 @@ for id in $("$FILO" unit next); do "$FILO" dispatch "$id" --role worker --brief 
 "$FILO" relay --interval 0.1 >"$TMP/relay.out" 2>&1 &
 relay=$!
 wait_for "$FILO" done
-kill "$relay"
+"$FILO" relay --stop >/dev/null; wait "$relay" || true
 
 assert "$("$FILO" done)" "DONE units=2"
 main="$(git -C "$REPO" show main:file.txt)"
@@ -42,7 +42,7 @@ has "$main" "change by a.r1.worker"
 has "$main" "change by b.r1.worker"
 assert "$(git -C "$REPO" log --format=%s main | grep -c '^\[filo\]')" "2"
 # every step is in the log, in protocol order
-steps="$("$FILO" log | awk '$2 != "claimed" && $2 != "acked" {print $2, $3}' | paste -sd, -)"
+steps="$("$FILO" log | awk '$2 !~ /^(claimed|acked|nacked)$/ {print $2, $3}' | paste -sd, -)"   # delivery bookkeeping aside
 assert "$steps" "unit_added a,unit_added b,dispatched a,finished a,dispatched a,finished a,merged a,dispatched b,finished b,dispatched b,finished b,merged b"
 
 echo "  flow ok"

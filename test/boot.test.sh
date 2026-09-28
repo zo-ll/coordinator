@@ -2,8 +2,8 @@
 # filo plan + apply: proposal/ask split, single-harness forcing, validation.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
-filo_plan() { "$FILO" plan "$@"; }
-filo_apply() { "$FILO" apply "$@"; }
+filo_plan() { "$ROOT/libexec/plan.sh" "$@"; }
+filo_apply() { "$ROOT/libexec/apply.sh" "$@"; }
 filo_cfg() { "$FILO" cfg "$@"; }
 
 
@@ -54,9 +54,6 @@ filo_apply --accept >/dev/null
 assert "$(filo_cfg get "$FILO_CONFIG" critic.model)" ""
 rm -f "$FILO_ROLES"
 filo_apply --answers 'autonomy=auto-merge critic.model=gpt-6-luna' >/dev/null
-
-# once configured, plan asks nothing
-assert "$(printf '%s\n' "$(filo_plan)" | sed -n 2p)" "ASK"
 
 # invalid harness answer fails loudly
 if filo_apply --answers 'critic.harness=ghost' >/dev/null 2>&1; then

@@ -712,8 +712,7 @@ cmd_relay() {
     [ -s "$RUN/session" ] || { fail 1 'relay: no session for this run (filo init)'; return; }
     start_relay "$(cat "$RUN/session")"; return
   fi
-  local interval=${F[interval]:-${RELAY_INTERVAL:-1}} attempts=${F[max-attempts]:-${RELAY_MAX_ATTEMPTS:-5}}
-  local backoff=${F[backoff]:-${RELAY_BACKOFF:-2}} once=${F[once]:-0} pidfile
+  local interval=${F[interval]:-1} attempts=${F[max-attempts]:-5} backoff=${F[backoff]:-2} once=${F[once]:-0} pidfile
   [[ $interval =~ ^[0-9]+(\.[0-9]+)?$ && $attempts =~ ^[0-9]+$ && $backoff =~ ^[0-9]+$ ]] || {
     fail 2 'relay: --interval, --max-attempts and --backoff must be numbers'; return; }
   GRACE=$(dur "$(cfg_val "$CONFIG" timebox.grace)" 2>/dev/null) || GRACE=30
@@ -895,8 +894,7 @@ resume() {
     [ -n "$cur" ] && recipe=$(cfg_val "$ENV_CONF" "harness.$cur.resume")
   fi
   [ -n "$recipe" ] || { echo 'relay: no relay.resume recipe (set FILO_RESUME, config, or env.conf)' >&2; return 1; }
-  session=${FILO_SESSION:-$(cfg_val "$CONFIG" relay.session)}
-  [ -n "$session" ] || session=$(cat "$RUN/session" 2>/dev/null || true)
+  session=${FILO_SESSION:-$(cat "$RUN/session" 2>/dev/null || true)}
   local -a argv
   IFS='|' read -r -a argv <<< "$recipe"
   for i in "${!argv[@]}"; do

@@ -9,16 +9,12 @@
 #   P slug report ts summary       a finished research report
 # Sentences carry watch's markup: \001 style \002 text \003.
 
-function m(k, t) { return "\001" k "\002" t "\003" }
-function q(s) { gsub(/[\001-\037]/, " ", s); return s }
 function role_of(slug) { return slug ~ /\.critic$/ ? "critic" : slug ~ /\.worker$/ ? "worker" : "researcher" }
 function feed(s) { print "F\t" int(E["ts"]) "\t" s; SENT[E["seq"]] = s }
 
 {
-    n = split($0, f, "\t")
-    if (f[n] != ".") next
-    delete E
-    for (i = 1; i < n; i++) { p = index(f[i], "="); if (p) E[substr(f[i], 1, p - 1)] = q(substr(f[i], p + 1)) }
+    if (!parse()) next
+    for (k in E) E[k] = q(E[k])
     t = E["type"]; u = E["unit"]
     if (!started) { print "S\t" int(E["ts"]); started = 1 }
 

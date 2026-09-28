@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Apply the user's answers over the proposal, validate, and write config.conf.
 #
-#   apply.sh [--accept] [--answers "critic.model=… autonomy=auto-merge"] [--config PATH]
+#   apply.sh [--accept] [--answers "critic.model=… autonomy=auto-merge"]
 #     -> OK config=<path>  |  FAIL <field>: <reason>
 #
 # Answers are literal `key=value` dotted config keys (space-separated). Only
@@ -13,7 +13,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFG="$HERE/cfg.sh"
 FILO_HOME="${FILO_HOME:-$HOME/.filo}"
 ENV_CONF="${FILO_ENV_CONF:-$FILO_HOME/env.conf}"
-PROPOSAL="${FILO_PROPOSAL:-$FILO_HOME/proposal.conf}"
+PROPOSAL="$FILO_HOME/proposal.conf"
 config="${FILO_CONFIG:-$PWD/.filo/config.conf}"
 answers=""
 
@@ -21,7 +21,6 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --accept)  shift ;;
     --answers) answers="$2"; shift 2 ;;
-    --config)  config="$2"; shift 2 ;;
     *) echo "apply.sh: unknown arg: $1" >&2; exit 2 ;;
   esac
 done

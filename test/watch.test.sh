@@ -67,7 +67,7 @@ hasnt "$(frame 80 --press "$(click 3 "$r" 0 | tr M m)")" "▸◐ busy1"         
 hasnt "$(frame 80 --press "$(click 3 "$r" 2)")" "▸◐ busy1"                  # nor another button
 has "$(frame 80 --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")")" "o reopen  x drop"
 has "$(frame 80 --press "$(click 3 "$r")$(click 3 "$r")")" "esc ‹  busy1  feature · round 1"  # again opens
-has "$(PAGER='head -n1' frame 80 --press "$(click "$(col_of "$bar" '? keys')" 70)")" "filo watch keys"
+has "$(PAGER='head -n1' frame 80 --press "$(click "$(col_of "$bar" '? keys')" 70)")" "filo watch   "
 has "$(frame 80 --press "$(click 3 "$r" 65)$(click 3 "$r" 65)")" "▸◐ busy1"  # wheel moves the selection
 has "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)")" "↑ 1 newer" # and scrolls the feed
 hasnt "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)$(click 3 "$(row_of '─ RECENT')" 64)")" "newer"

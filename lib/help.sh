@@ -28,7 +28,7 @@ role agents (worker, critic, researcher):
   finish ...               report the result; this wakes the coordinator
 
 plumbing (init and the relay use these):
-  detect, plan, apply, start, relay, cfg, unit next, done
+  start, relay, cfg, unit next, done
 EOF
 }
 
@@ -43,14 +43,48 @@ filo watch --once [--width N] [--height N] [--open <unit> [--tab <tab>]]
   unit in progress with its agent (role, round, time, liveness, latest
   output), its branch, worktree and changed files, and the critic's notes;
   open decisions and research reports; then up next, done, and recent events.
-  It redraws once a second. j/k (or arrows, tab) select an item and keys act
-  on it: a approve (and merge), r reject with a note, o/x reopen/drop, c/d
-  confirm/change a decision, v read a report, ↵ open a unit (tabs: brief,
-  findings, diff, log, output, history; 1-6 or ←/→, esc back); m messages
-  the coordinator, w restarts a stopped wake process, ? keys, q quits (the
-  run keeps going). The mouse works too: click selects (again opens), a
-  "needs you" entry jumps to its item, a key in the bar presses it, the
-  wheel moves the selection or scrolls the feed; shift-drag selects text.
+  It redraws once a second; clean passes merge on their own. A unit shows
+  "needs you" when the critic left notes, the unit is marked risky, or it
+  is blocked; open decisions and unread reports need you too.
+
+  Moving
+    j / k, ↓ / ↑, tab   select the next / previous item in WORK
+
+  On the ▸ selected item
+    a       approve a passed unit and merge it (re-running its checks)
+    r       send a passed unit back, with a note
+    o / x   reopen / drop a blocked unit (drop asks first; it is final)
+    c / d   confirm / change an open decision
+    v       read a research report
+    ↵       open it: a unit in its own view (below); a report; a
+            researcher's output. With nothing selected, asks which unit.
+
+  In a unit's view
+    1-6, ← / →   the tab: brief, findings, diff, log (the merge's checks),
+                 output, history
+    j / k, space scroll; the output of a running agent follows its tail
+                 until you scroll up
+    n / N        next / previous file in the diff
+    [ / ]        an earlier / later round's output
+    p            this tab in $PAGER
+    esc          back to the main screen
+    a / r        approve / reject, when the unit passed
+
+  Anywhere
+    m       send the coordinator a message
+    w       restart the wake process, when it is down
+    ?       this page
+    q       quit (the run keeps going)
+
+  Mouse
+    click an item to select it, the selected one again to open it; click a
+    "needs you" entry to jump to it, a unit in up next or done to open it,
+    a key in the bottom bar to press it. The wheel moves the selection over
+    WORK and scrolls RECENT back. In a unit's view, click a tab to show it
+    or "esc ‹" to go back; the wheel scrolls it.
+    In a prompt: ↵ or ✓ send sends, esc or ✗ cancel cancels. Shift-drag
+    selects text in most terminals while watch has the mouse.
+
   NO_COLOR turns colors off.
 EOF
     ;;
@@ -171,9 +205,6 @@ EOF
     ;;
     log) echo 'filo log [<id>]   "<seq> <type> <unit|-> <what>" per event' ;;
     done) echo 'filo done   -> DONE units=<n> (exit 0) | OPEN <ids> (exit 1)' ;;
-    detect) echo 'filo detect   -> DETECT current=<h> installed=<a,b> spawnable=<a,b>' ;;
-    plan) echo 'filo plan   -> PROPOSE <key=value>... then an ASK block of fields to confirm' ;;
-    apply) echo 'filo apply --accept | --answers "key=value ..."   -> OK config=<path> | FAIL <field>: <reason>' ;;
     start) cat <<'EOF'
 filo start [--harness <h>] [--session <id>] [--no-relay]
   -> SESSION <id> source=<...> harness=<h> repo=<repo>  [RELAY pid=<pid>]

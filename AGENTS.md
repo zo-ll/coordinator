@@ -5,9 +5,10 @@ Multi-agent protocol for producing software. See [SPEC.md](SPEC.md).
 ## Conventions
 
 - The engine is bash: `bin/filo` dispatches to `lib/cmd.sh`; `lib/core.sh`
-  holds the shared plumbing; `lib/model.awk` is the state machine; `libexec/`
-  holds the boot scripts (cfg, detect, plan, apply); `lib/help.sh` is
-  `filo help`. Nothing to build.
+  holds the shared plumbing; `lib/model.awk` is the state machine, reading
+  the log through `lib/events.awk` (the line format, shared with watch);
+  `libexec/` holds init's boot scripts (cfg, detect, plan, apply);
+  `lib/help.sh` is `filo help`. Nothing to build.
 - Commands print one short line and exit nonzero on failure; refusals are
   `REFUSED <unit> <event>: <reason>`. No `eval`; config is parsed, never run.
 - Run state is one append-only log, `<repo>/.filo/events.log`

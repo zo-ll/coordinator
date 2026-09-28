@@ -1,10 +1,7 @@
-# model.awk: the run's state machine, folded from the event log.
+# model.awk: the run's state machine, folded from the event log (its line
+# format and parse() are lib/events.awk's).
 #
-# The log is one event per line: tab-separated key=value fields, starting
-# with seq= and ending with a lone "." field. A line without the terminator
-# (a torn write) is ignored. Repeated keys (ran=, flags=) are lists.
-#
-#   awk -f model.awk -v mode=<mode> [-v cand=FILE] [-v unit=ID] [-v slug=S] LOG [FILE]
+#   awk -f events.awk -f model.awk -v mode=<mode> [-v cand=FILE] [-v unit=ID] [-v slug=S] LOG [FILE]
 #
 # mode=check   apply LOG leniently, then the events in cand strictly: prints
 #              OK, DUP (a finished slug that already finished), or
@@ -12,18 +9,7 @@
 # mode=units   one line per unit (fields joined by \037, see END)
 # mode=research, undelivered, inflight, owner, log, lastseq: see END.
 
-BEGIN { FS = "\t"; US = "\037"; MAXD = 2 }
-
-function parse(   i, p, k, v) {
-    delete E
-    if ($NF != "." || substr($1, 1, 4) != "seq=") return 0
-    for (i = 1; i < NF; i++) {
-        p = index($i, "="); if (!p) continue
-        k = substr($i, 1, p - 1); v = substr($i, p + 1)
-        if (k in E) E[k] = E[k] US v; else E[k] = v
-    }
-    return ("type" in E)
-}
+BEGIN { MAXD = 2 }
 
 function terminal(s) { return s == "merged" || s == "dropped" }
 
@@ -66,18 +52,18 @@ function wake(t) {
            (t == "merged" && E["by"] == "auto")
 }
 
-function q(s) { return "\"" s "\"" }
+function dq(s) { return "\"" s "\"" }
 
 # apply checks E against the transition table and applies it: "" when legal,
 # "DUP" for a repeated finish, else the reason. A refusal changes nothing.
 function apply(   t, u, id, r, want, n, i, a, s, ns) {
     t = E["type"]; u = E["unit"]
     if (t == "unit_added") {
-        if (u !~ /^[A-Za-z0-9_-]+$/) return "invalid id " q(u) " (use [A-Za-z0-9_-]+)"
+        if (u !~ /^[A-Za-z0-9_-]+$/) return "invalid id " dq(u) " (use [A-Za-z0-9_-]+)"
         if (u in ST) return "id already exists"
         if (E["kind"] == "") return "kind is required"
         n = split(E["deps"], a, ",")
-        for (i = 1; i <= n; i++) if (a[i] != "" && (a[i] == u || !(a[i] in ST))) return "unknown dep " q(a[i])
+        for (i = 1; i <= n; i++) if (a[i] != "" && (a[i] == u || !(a[i] in ST))) return "unknown dep " dq(a[i])
         ST[u] = "todo"; KIND[u] = E["kind"]; GOAL[u] = E["goal"]; RISK[u] = E["risk"]
         DEPS[u] = E["deps"]; ROUND[u] = 0; ORDER[++NU] = u
         return ""
@@ -85,17 +71,17 @@ function apply(   t, u, id, r, want, n, i, a, s, ns) {
     if (t == "dispatched") {
         if (E["role"] == "researcher") {
             s = E["slug"]
-            if (s == "" || (s in RPID) || (s in FIN)) return "research slug " q(s) " unusable"
+            if (s == "" || (s in RPID) || (s in FIN)) return "research slug " dq(s) " unusable"
             RPID[s] = E["pid"]; RREP[s] = E["report"]; RLOG[s] = E["log"]
             RDISP[s] = E["ts"]; RTB[s] = E["timebox"]; RORD[++NRS] = s
             return ""
         }
-        if (!(u in ST)) return "unknown unit " q(u)
-        if (E["role"] != "worker" && E["role"] != "critic") return "unknown role " q(E["role"])
+        if (!(u in ST)) return "unknown unit " dq(u)
+        if (E["role"] != "worker" && E["role"] != "critic") return "unknown role " dq(E["role"])
         r = nextround(u, E["role"]); if (NRERR != "") return NRERR
         if (E["round"] + 0 != r) return "round " E["round"] ", want " r
         want = u ".r" r "." E["role"]
-        if (E["slug"] != want) return "slug " q(E["slug"]) ", want " q(want)
+        if (E["slug"] != want) return "slug " dq(E["slug"]) ", want " dq(want)
         ST[u] = (E["role"] == "critic") ? "reviewing" : "working"
         if (E["role"] == "worker" && E["brief"] != "") WBRIEF[u] = E["brief"]
         ROUND[u] = r; ROLE[u] = E["role"]; OWES[u] = E["slug"]; PID[u] = E["pid"]
@@ -107,19 +93,19 @@ function apply(   t, u, id, r, want, n, i, a, s, ns) {
         s = E["slug"]
         if (s in FIN) return "DUP"
         if (s in RPID) {
-            if (E["result"] != "done") return "researcher result " q(E["result"]) " (want done)"
+            if (E["result"] != "done") return "researcher result " dq(E["result"]) " (want done)"
             delete RPID[s]; FIN[s] = 1
             return ""
         }
         id = owner(s)
-        if (id == "") return "slug " q(s) " is not owed by any live launch"
-        if (u != "" && u != id) return "slug " q(s) " belongs to " id
+        if (id == "") return "slug " dq(s) " is not owed by any live launch"
+        if (u != "" && u != id) return "slug " dq(s) " belongs to " id
         ns = ""
         if (ROLE[id] == "worker" && E["result"] == "done") ns = "built"
         else if (ROLE[id] == "worker" && E["result"] == "partial") ns = "handback"
         else if (ROLE[id] == "critic" && E["result"] == "pass") ns = "passed"
         else if (ROLE[id] == "critic" && E["result"] == "handback") ns = "handback"
-        else return ROLE[id] " result " q(E["result"])
+        else return ROLE[id] " result " dq(E["result"])
         ST[id] = ns
         if (ns == "passed") { PASS[id] = E["state"]; EVL[id] = E["level"]; NOTE[id] = E["notes"] }
         OWES[id] = ""; FIN[s] = 1
@@ -139,7 +125,7 @@ function apply(   t, u, id, r, want, n, i, a, s, ns) {
         return ""
     }
     if (t == "msg") {
-        if (u != "" && !(u in ST)) return "unknown unit " q(u)
+        if (u != "" && !(u in ST)) return "unknown unit " dq(u)
         return ""
     }
     if (t == "claimed") {
@@ -156,8 +142,8 @@ function apply(   t, u, id, r, want, n, i, a, s, ns) {
     }
     if (t != "converted" && t != "approved" && t != "rejected" && t != "verify_failed" && \
         t != "merged" && t != "blocked" && t != "dropped" && t != "reopened")
-        return "unknown event type " q(t)
-    if (!(u in ST)) return "unknown unit " q(u)
+        return "unknown event type " dq(t)
+    if (!(u in ST)) return "unknown unit " dq(u)
     if (t == "converted") {
         if (ST[u] != "passed") return "cannot convert from " ST[u]
         ST[u] = "handback"; PASS[u] = ""; EVL[u] = ""; NOTE[u] = ""
@@ -195,7 +181,7 @@ function describe(   t, s, lst) {
     }
     if (t == "converted") return E["from"] " -> " E["to"] ": " E["reason"]
     if (t == "died") return E["slug"] " pid=" E["pid"] " " E["reason"]
-    if (t == "verify_failed") return q(E["command"]) " exit=" E["exit"] " log=" E["log"]
+    if (t == "verify_failed") return dq(E["command"]) " exit=" E["exit"] " log=" E["log"]
     if (t == "merged") return "sha=" E["sha"]
     if (t == "claimed" || t == "acked" || t == "nacked") return trimsp("seqs=" E["seqs"] " " E["batch"])
     if (t == "msg") return E["text"]

@@ -16,7 +16,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NAME="${FILO_SKILL_NAME:-filo}"
+NAME=filo
 BIN_DIR="${FILO_BIN_DIR:-$HOME/.local/bin}"
 
 # the harnesses filo knows: skills dir | home dir | command (- for none: a

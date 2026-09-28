@@ -5,9 +5,9 @@
 #   two harnesses-> role map asked, lane.strong proposed
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
-filo_detect() { "$FILO" detect "$@"; }
-filo_plan() { "$FILO" plan "$@"; }
-filo_apply() { "$FILO" apply "$@"; }
+filo_detect() { "$ROOT/libexec/detect.sh" "$@"; }
+filo_plan() { "$ROOT/libexec/plan.sh" "$@"; }
+filo_apply() { "$ROOT/libexec/apply.sh" "$@"; }
 filo_cfg() { "$FILO" cfg "$@"; }
 
 
@@ -49,7 +49,7 @@ fresh one
 # current is the pinned sentinel; the matrix case only cares that the role map
 # is forced.
 out="$(PATH="$TMP/bin" filo_detect)"
-assert "$(printf '%s\n' "$out" | sed -E 's/current=[^ ]+ //')" \
+assert "$(printf '%s\n' "$out" | sed -E 's/current=[^ ]+ //; s/ source=[^ ]+$//')" \
   "DETECT installed=codex spawnable=codex"
 out="$(PATH="$TMP/bin" filo_plan)"
 assert "$(printf '%s\n' "$out" | sed -n 1p)" \

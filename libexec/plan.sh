@@ -13,23 +13,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFG="$HERE/cfg.sh"
 FILO_HOME="${FILO_HOME:-$HOME/.filo}"
 ENV_CONF="${FILO_ENV_CONF:-$FILO_HOME/env.conf}"
-CONFIG="${FILO_CONFIG:-$PWD/.filo/config.conf}"
-PROPOSAL="${FILO_PROPOSAL:-$FILO_HOME/proposal.conf}"
+PROPOSAL="$FILO_HOME/proposal.conf"
 mkdir -p "$FILO_HOME"
 
 get() { "$CFG" get "$ENV_CONF" "$1" 2>/dev/null || true; }
-
-# already configured -> nothing to ask
-if [ -f "$CONFIG" ]; then
-  printf 'PROPOSE critic=%s researcher=%s lane.default=%s lane.strong=%s autonomy=%s\n' \
-    "$("$CFG" get "$CONFIG" critic.harness 2>/dev/null || echo -)" \
-    "$("$CFG" get "$CONFIG" researcher.harness 2>/dev/null || echo -)" \
-    "$("$CFG" get "$CONFIG" lane.default.harness 2>/dev/null || echo -)" \
-    "$("$CFG" get "$CONFIG" lane.strong.harness 2>/dev/null || echo none)" \
-    "$("$CFG" get "$CONFIG" autonomy 2>/dev/null || echo -)"
-  printf 'ASK\n'
-  exit 0
-fi
 
 IFS=',' read -r -a sp_raw <<< "$(get spawnable)"
 sp=()

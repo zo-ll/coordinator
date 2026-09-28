@@ -3,7 +3,7 @@
 # lands in) and one per refused move (a substring of the refusal).
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
-MODEL="$ROOT/lib/model.awk"
+MODEL="$ROOT/lib/model.awk"; EVENTS="$ROOT/lib/events.awk"
 T=$'\t'
 
 add()  { echo "type=unit_added${T}unit=$1${T}kind=feature${2:+${T}deps=$2}"; }
@@ -35,14 +35,14 @@ check() {
   write_log "$TMP/log" "$@"
   printf 'seq=%s\tts=0\t%s\t.\n' $(( $# + 1 )) "$e" > "$TMP/cand"
   local res state
-  res=$(awk -v mode=check -v cand="$TMP/cand" -f "$MODEL" "$TMP/log" "$TMP/cand" || true)
+  res=$(awk -v mode=check -v cand="$TMP/cand" -f "$EVENTS" -f "$MODEL" "$TMP/log" "$TMP/cand" || true)
   if [[ $want == !* ]]; then
     [[ $res == *"${want#!}"* ]] || { echo "  $name: got '$res', want refusal containing '${want#!}'"; exit 1; }
     return
   fi
   [ "$res" = OK ] || { echo "  $name: refused: $res"; exit 1; }
   cat "$TMP/cand" >> "$TMP/log"
-  state=$(awk -v mode=units -f "$MODEL" "$TMP/log" | awk -F$'\037' '$1 == "u" { print $2 }')
+  state=$(awk -v mode=units -f "$EVENTS" -f "$MODEL" "$TMP/log" | awk -F$'\037' '$1 == "u" { print $2 }')
   [ "$state" = "$want" ] || { echo "  $name: state '$state', want '$want'"; exit 1; }
 }
 
@@ -91,7 +91,7 @@ check convert-working   "!cannot convert"                    "$(on converted u)"
 # readiness: b waits on a until a is merged or dropped
 check dep-not-ready     "!not ready"                         "$(disp b worker 1 1)" "$(add a)" "$(add b a)"
 write_log "$TMP/log" "$(add a)" "$(add b a)" "$(on dropped a)"
-ready=$(awk -v mode=units -f "$MODEL" "$TMP/log" | awk -F$'\037' '$19 == 1 { print $1 }')
+ready=$(awk -v mode=units -f "$EVENTS" -f "$MODEL" "$TMP/log" | awk -F$'\037' '$19 == 1 { print $1 }')
 assert "$ready" "b"
 
 # retry cap: a second death in a round leaves no third launch
@@ -103,14 +103,14 @@ check reopen-round      working "$(disp u worker 2 30)" "${to_handback[@]}" "$(o
 
 # delivery: a wake event is undelivered, claimed, nacked, claimed, acked
 write_log "$TMP/log" "${to_built[@]}"
-assert "$(awk -v mode=undelivered -f "$MODEL" "$TMP/log" | wc -l)" "1"
+assert "$(awk -v mode=undelivered -f "$EVENTS" -f "$MODEL" "$TMP/log" | wc -l)" "1"
 printf 'seq=4\tts=0\ttype=claimed\tseqs=3\tbatch=b\t.\n' >> "$TMP/log"
-assert "$(awk -v mode=undelivered -f "$MODEL" "$TMP/log" | wc -l)" "0"
-assert "$(awk -v mode=inflight -f "$MODEL" "$TMP/log")" "3"
+assert "$(awk -v mode=undelivered -f "$EVENTS" -f "$MODEL" "$TMP/log" | wc -l)" "0"
+assert "$(awk -v mode=inflight -f "$EVENTS" -f "$MODEL" "$TMP/log")" "3"
 printf 'seq=5\tts=0\ttype=claimed\tseqs=3\t.\n' > "$TMP/cand"
-has "$(awk -v mode=check -v cand="$TMP/cand" -f "$MODEL" "$TMP/log" "$TMP/cand" || true)" "already claimed"
+has "$(awk -v mode=check -v cand="$TMP/cand" -f "$EVENTS" -f "$MODEL" "$TMP/log" "$TMP/cand" || true)" "already claimed"
 printf 'seq=5\tts=0\ttype=nacked\tseqs=3\t.\nseq=6\tts=0\ttype=claimed\tseqs=3\t.\nseq=7\tts=0\ttype=acked\tseqs=3\t.\n' >> "$TMP/log"
-assert "$(awk -v mode=undelivered -f "$MODEL" "$TMP/log" | wc -l)" "0"
-assert "$(awk -v mode=inflight -f "$MODEL" "$TMP/log")" ""
+assert "$(awk -v mode=undelivered -f "$EVENTS" -f "$MODEL" "$TMP/log" | wc -l)" "0"
+assert "$(awk -v mode=inflight -f "$EVENTS" -f "$MODEL" "$TMP/log")" ""
 
 echo "  model ok"

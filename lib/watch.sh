@@ -16,15 +16,21 @@ clean() { local s=${1//[$'\001'-$'\037']/ }; printf '%s' "${s//$'\177'/}"; }
 
 vis() { local s=${1//$W_SO+([a-zA-Z])$W_SM/}; s=${s//$W_SE/}; printf '%s' "${#s}"; }
 
+# seg: the next segment off $s (the caller's): its style in k ("" for plain
+# text), its text in t
+seg() {
+  if [[ $s == "$W_SO"* ]]; then
+    k=${s:1}; k=${k%%"$W_SM"*}; s=${s#*"$W_SM"}; t=${s%%"$W_SE"*}; s=${s#*"$W_SE"}
+  else
+    k=""; t=${s%%"$W_SO"*}; s=${s:${#t}}
+  fi
+}
+
 # fit <markup> <width>: exactly <width> visible columns, … where cut
 fit() {
   local s=$1 w=$2 out="" n=0 k t room
   while [ -n "$s" ] && [ "$n" -lt "$w" ]; do
-    if [[ $s == "$W_SO"* ]]; then
-      k=${s:1}; k=${k%%"$W_SM"*}; s=${s#*"$W_SM"}; t=${s%%"$W_SE"*}; s=${s#*"$W_SE"}
-    else
-      k=""; t=${s%%"$W_SO"*}; s=${s:${#t}}
-    fi
+    seg
     room=$((w - n))
     if [ "${#t}" -gt "$room" ]; then t="${t:0:room-1}…"; s=""; fi
     if [ -n "$k" ]; then out+="$W_SO$k$W_SM$t$W_SE"; else out+=$t; fi
@@ -50,11 +56,7 @@ ansi() {
 hits() {
   local s=$1 n=0 k t from=() txt=() i
   while [ -n "$s" ]; do
-    if [[ $s == "$W_SO"* ]]; then
-      k=${s:1}; k=${k%%"$W_SM"*}; s=${s#*"$W_SM"}; t=${s%%"$W_SE"*}; s=${s#*"$W_SE"}
-    else
-      k=""; t=${s%%"$W_SO"*}; s=${s:${#t}}
-    fi
+    seg
     [ "$k" != "$2" ] || { from+=($((n + 1))); txt+=("$t"); }
     n=$((n + ${#t}))
   done
@@ -102,7 +104,7 @@ watch_gather() {
       A) ACKED=$a ;;
       P) REPORT[$a]="$b"$'\t'"$c"$'\t'"$d" ;;
     esac
-  done < <(unc1 "$LOG" | awk -f "$SKILL/lib/watch.awk")
+  done < <(unc1 "$LOG" | awk -f "$EVENTS" -f "$SKILL/lib/watch.awk")
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     UNITS+=("$line"); id=${line%%"$US"*}
@@ -415,13 +417,11 @@ plain() { LC_ALL=C sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g; s/\xc2[\x80-\x9f]//g' | exp
 # out_logs <id>: the unit's agent output files, oldest first
 out_logs() { ls -tr "$RUN/log/$1".r*.*.log 2>/dev/null || true; }
 
-# EV_AWK: the start of an awk program over the event log (-v id=<unit>): each
-# complete event of that unit lands in E (repeated ran= fields in RAN,
-# newline-joined), t is its type; m() is markup, hm() a clock time, wrap()
+# EV_AWK: the start of an awk program over the event log, run after
+# lib/events.awk (-v id=<unit>): each event of that unit lands in E as display
+# text (lists joined by US), t is its type; hm() is a clock time, wrap()
 # prints words wrapped to width w after an indent
 EV_AWK='
-  function q(s) { gsub(/[\001-\037]/, " ", s); return s }
-  function m(k, s) { return "\001" k "\002" s "\003" }
   function hm(s) { return strftime("%H:%M", s) }
   function wrap(s, w, ind, ind2,   n, a, i, l) {
     n = split(s, a, " "); l = ""
@@ -431,15 +431,12 @@ EV_AWK='
     }
     if (l != "") print ind l
   }
-  BEGIN { EVL["none"] = "○○○"; EVL["typecheck"] = "●○○"; EVL["tests"] = "●●○"; EVL["live"] = "●●●" }
-  $NF != "." { next }
-  { delete E; RAN = ""
-    for (i = 1; i < NF; i++) { p = index($i, "="); k = substr($i, 1, p - 1); v = q(substr($i, p + 1))
-      if (k == "ran") RAN = RAN "\n" v; else E[k] = v } }
-  E["unit"] != id { next }
+  BEGIN { split(evl, g, ","); EVL["none"] = g[1]; EVL["typecheck"] = g[2]; EVL["tests"] = g[3]; EVL["live"] = g[4] }
+  !parse() || E["unit"] != id { next }
+  { for (k in E) E[k] = q(E[k]) }
   { t = E["type"] }
 '
-ev_awk() { local id=$1 prog=$2; shift 2; unc1 "$LOG" | awk -F'\t' -v id="$id" -v w="$W_W" "$@" "$EV_AWK$prog"; }
+ev_awk() { local id=$1 prog=$2; shift 2; unc1 "$LOG" | awk -v id="$id" -v w="$W_W" -v evl="$EVL_none,$EVL_typecheck,$EVL_tests,$EVL_live" "$@" -f "$EVENTS" -f <(printf '%s' "$EV_AWK$prog"); }
 
 # brief_fields: one headed section per brief field: the ones the worker acts
 # on first, then the brief's others in its order
@@ -496,7 +493,7 @@ findings_tab() {
       R[n] = E["round"]; RES[n] = "being reviewed"; next }
     t == "finished" && E["role"] == "critic" && n {
       RES[n] = E["result"] == "pass" ? "passed" : E["result"] == "handback" ? "sent back" : E["result"]
-      LV[n] = E["level"]; TS[n] = E["ts"]; SUM[n] = E["summary"]; NOTE[n] = E["notes"]; CMD[n] = RAN; next }
+      LV[n] = E["level"]; TS[n] = E["ts"]; SUM[n] = E["summary"]; NOTE[n] = E["notes"]; CMD[n] = E["ran"]; next }
     t == "converted" && n { RES[n] = "sent back"; OUT[n] = OUT[n] "\n" m("y", "↩") " the pass lacked evidence: " E["reason"] }
     t == "died" && E["slug"] ~ /critic$/ && n { RES[n] = m("r", "the critic died") }
     t == "verify_failed" && n { OUT[n] = OUT[n] "\n" m("r", "✗") " the merge re-ran the checks: exit " E["exit"] " " m("d", "(see 4 log)") }
@@ -510,7 +507,7 @@ findings_tab() {
         if (i == n) {
           if (SUM[i] != "") { print ""; wrap("\"" SUM[i] "\"", w - 4, "   ", "    ") }
           if (CMD[i] != "" || LV[i] != "") {
-            print ""; print " " m("b", "Checks"); k = split(substr(CMD[i], 2), c, "\n"); for (j = 1; j <= k; j++) print "   $ " c[j]
+            print ""; print " " m("b", "Checks"); k = split(CMD[i], c, US); for (j = 1; j <= k; j++) print "   $ " c[j]
             if (LV[i] != "" && LV[i] != "live") print "   " m("d", "– live check  not run")
           }
           if (NOTE[i] != "") { print ""; print " " m("b", "Findings"); k = split(NOTE[i], c, / \| /); for (j = 1; j <= k; j++) wrap(c[j], w - 10, "   " m("y", "note") "  ", "         ") }
@@ -634,7 +631,7 @@ output_tab() {
 
 # 3f: the unit's story, oldest first, in the feed's words
 history_tab() {
-  unc1 "$LOG" | awk -F'\t' -v id="$VIEW" 'index($0, "\tunit=" id "\t")' | awk -f "$SKILL/lib/watch.awk" \
+  unc1 "$LOG" | awk -F'\t' -v id="$VIEW" 'index($0, "\tunit=" id "\t")' | awk -f "$EVENTS" -f "$SKILL/lib/watch.awk" \
     | awk -F'\t' '$1 == "F" { print " \001d\002" strftime("%H:%M", $2) "\003  " $3; n++ } END { if (!n) print " \001d\002no events yet\003" }'
 }
 
@@ -843,55 +840,7 @@ page() { # page <file>
   term_on
 }
 
-keys_page() {
-  local f="$W_TMP.page"
-  cat > "$f" <<'EOF'
-filo watch keys
-
-Moving
-  j / k, ↓ / ↑, tab   select the next / previous item in WORK
-
-On the ▸ selected item
-  a       approve a passed unit and merge it (re-running its checks)
-  r       send a passed unit back, with a note
-  o / x   reopen / drop a blocked unit (drop asks first; it is final)
-  c / d   confirm / change an open decision
-  v       read a research report
-  ↵       open it: a unit in its own view (below); a report; a
-          researcher's output. With nothing selected, asks which unit.
-
-In a unit's view
-  1-6, ← / →   the tab: brief, findings, diff, log (the merge's checks),
-               output, history
-  j / k, space scroll; the output of a running agent follows its tail
-               until you scroll up
-  n / N        next / previous file in the diff
-  [ / ]        an earlier / later round's output
-  p            this tab in $PAGER
-  esc          back to the main screen
-  a / r        approve / reject, when the unit passed
-
-Anywhere
-  m       send the coordinator a message
-  w       restart the wake process, when it is down
-  ?       this page
-  q       quit (the run keeps going)
-
-Mouse
-  click an item to select it, the selected one again to open it; click a
-  "needs you" entry to jump to it, a unit in up next or done to open it,
-  a key in the bottom bar to press it. The wheel moves the selection over
-  WORK and scrolls RECENT back. In a unit's view, click a tab to show it
-  or "esc ‹" to go back; the wheel scrolls it.
-  In a prompt: ↵ or ✓ send sends, esc or ✗ cancel cancels. Shift-drag
-  selects text in most terminals while watch has the mouse.
-
-Clean passes merge on their own. A unit shows "needs you" when the critic
-left notes, the unit is marked risky, or it is blocked; open decisions and
-unread reports need you too.
-EOF
-  page "$f"
-}
+keys_page() { ( . "$SKILL/lib/help.sh"; help_verb watch ) > "$W_TMP.page"; page "$W_TMP.page"; }
 
 # on_mouse <M:...>: a click or wheel turn, hit-tested against the last frame.
 # Click an item to select it, the selected one to open it, a "needs you"

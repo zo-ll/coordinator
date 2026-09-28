@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Detect the environment and write $FILO_HOME/env.conf.
 #
-#   detect.sh   -> DETECT current=<h> installed=<a,b> spawnable=<a,b>
+#   detect.sh   -> DETECT current=<h> installed=<a,b> spawnable=<a,b> source=<how current was found>
 #
 # Current harness: env sentinel first, else walk the ancestor process chain.
 # Installed: command -v over the known list (override with FILO_KNOWN).
@@ -79,8 +79,6 @@ done
 
 : > "$ENV_CONF"
 "$CFG" set "$ENV_CONF" current "$current"
-"$CFG" set "$ENV_CONF" current_source "$source"
-"$CFG" set "$ENV_CONF" installed "$(join_by , "${installed[@]:-}")"
 "$CFG" set "$ENV_CONF" spawnable "$(join_by , "${spawnable[@]:-}")"
 for h in "${spawnable[@]:-}"; do
   [ -n "$h" ] || continue
@@ -89,5 +87,5 @@ for h in "${spawnable[@]:-}"; do
   "$CFG" set "$ENV_CONF" "harness.$h.resume" "$(resume_recipe "$h")"
 done
 
-printf 'DETECT current=%s installed=%s spawnable=%s\n' \
-  "${current:-none}" "$(join_by , "${installed[@]:-}")" "$(join_by , "${spawnable[@]:-}")"
+printf 'DETECT current=%s installed=%s spawnable=%s source=%s\n' \
+  "${current:-none}" "$(join_by , "${installed[@]:-}")" "$(join_by , "${spawnable[@]:-}")" "$source"

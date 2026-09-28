@@ -27,11 +27,7 @@ esac
 # shellcheck source=../lib/core.sh
 . "$SKILL/lib/core.sh"
 
-case "$verb" in
-  cfg|detect|plan|apply)
-    export FILO_CONFIG="$CONFIG"
-    exec "$SKILL/libexec/$verb.sh" "$@" ;;
-esac
+[ "$verb" != cfg ] || exec "$SKILL/libexec/cfg.sh" "$@"
 
 # shellcheck source=../lib/cmd.sh
 . "$SKILL/lib/cmd.sh"

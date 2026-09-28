@@ -82,7 +82,8 @@ transitions, timeouts, and retry caps are code.
 
 `bin/filo`, a bash script with subcommands: `lib/core.sh` (paths, the locked
 append, queries, launch, the state hash), `lib/cmd.sh` (the commands),
-`lib/model.awk` (the state machine), `libexec/` (cfg, detect, plan, apply).
+`lib/model.awk` (the state machine) over `lib/events.awk` (the log's line
+format), `libexec/` (init's cfg, detect, plan, apply).
 Runtime: bash 4.4+, coreutils, util-linux (`flock`, `setsid`), awk, git; nothing
 to build. The repo is symlinked into each harness's skill dir, so everything
 stays live on `git pull`.

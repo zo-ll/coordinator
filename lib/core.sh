@@ -6,7 +6,7 @@
 # its only parser and holds the transition table.
 
 US=$'\037'
-MODEL="$SKILL/lib/model.awk"
+MODEL="$SKILL/lib/model.awk" EVENTS="$SKILL/lib/events.awk"
 
 fail() { # fail <code> <printf args...>: one line to stderr
   local code=$1; shift
@@ -67,7 +67,7 @@ ev() {
 model() {
   local mode=$1; shift
   [ -f "$LOG" ] || { [ "$mode" = lastseq ] && echo 0; return 0; }
-  awk -v mode="$mode" "$@" -f "$MODEL" "$LOG"
+  awk -v mode="$mode" "$@" -f "$EVENTS" -f "$MODEL" "$LOG"
 }
 
 # repair: under the lock, cut a torn final line so the next record starts clean
@@ -104,7 +104,7 @@ commit() {
     seq=$((seq + 1))
     printf 'seq=%s\tts=%s\t%s\t.\n' "$seq" "$ts" "$line" >> "$tmp"
   done < "$CAND"
-  res=$(awk -v mode=check -v cand="$tmp" -f "$MODEL" "$LOG" "$tmp") || rc=$?
+  res=$(awk -v mode=check -v cand="$tmp" -f "$EVENTS" -f "$MODEL" "$LOG" "$tmp") || rc=$?
   if [ "$res" = OK ]; then
     cat "$tmp" >> "$LOG"
     COMMITTED_SEQ=$seq
