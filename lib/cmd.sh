@@ -696,8 +696,10 @@ cmd_relay() {
   if [ "${F[stop]:-0}" = 1 ]; then
     # the lock, not the pidfile, says whether a relay runs: a pidfile left by a
     # killed relay may name someone else's process by now
-    local rp i; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
+    local rp i
     relay_running || { echo "RELAY none running"; return 0; }
+    # the relay writes its pid just after taking the lock: give it a moment
+    for i in $(seq 20); do rp=$(cat "$RUN/relay.pid" 2>/dev/null || true); alive "$rp" && break; sleep 0.05; done
     alive "$rp" || { fail 1 'relay: %s is held but %s names no live process' "$RUN/relay.lock" "$RUN/relay.pid"; return; }
     kill -TERM "$rp" 2>/dev/null || true
     for i in $(seq 50); do relay_running || break; sleep 0.1; done
@@ -707,8 +709,6 @@ cmd_relay() {
     return 0
   fi
   if [ "${F[detach]:-0}" = 1 ]; then   # (re)start this run's relay in the background
-    local rp; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
-    if relay_running; then echo "RELAY pid=$rp (already running)"; return 0; fi
     [ -s "$RUN/session" ] || { fail 1 'relay: no session for this run (filo init)'; return; }
     start_relay "$(cat "$RUN/session")"; return
   fi
@@ -736,6 +736,10 @@ cmd_relay() {
     reap
     BATCH="" SEQS=""
     commit claim || { fail 1 'relay: cannot claim a batch'; return; }
+    if [ "$RELAY_STOP" = 1 ]; then   # stopped while claiming: no new turn, the events wait
+      [ -z "$BATCH" ] || one_event type=nacked seqs="$SEQS" batch="$BATCH" || true
+      break
+    fi
     if [ -z "$BATCH" ]; then nap "$interval"; continue; fi
     deliver "$attempts" "$backoff" || return 1
     [ "$once" = 1 ] && return 0
@@ -747,7 +751,10 @@ cmd_relay() {
 relay_running() { ! flock -n "$RUN/relay.lock" true 2>/dev/null; }
 
 # nap <seconds>: sleep, but a trapped signal (relay --stop) ends it at once
-nap() { sleep "$1" & local p=$!; wait "$p" 2>/dev/null || { kill "$p" 2>/dev/null || true; }; }
+nap() {
+  [ "${RELAY_STOP:-0}" = 0 ] || return 0
+  sleep "$1" & local p=$!; wait "$p" 2>/dev/null || { kill "$p" 2>/dev/null || true; }
+}
 
 older() { awk -v a="$1" -v b="$2" -v c="$3" 'BEGIN { exit !(a - b > c) }'; }
 
@@ -1052,6 +1059,7 @@ cmd_start() {
 # start_relay <session>: the relay, detached, for this run -> RELAY pid=<pid>
 start_relay() {
   local pid
+  if relay_running; then echo "RELAY pid=$(cat "$RUN/relay.pid" 2>/dev/null || true) (already running)"; return 0; fi
   mkdir -p "$RUN/log"
   pid=$(
     (
@@ -1063,6 +1071,8 @@ start_relay() {
   )
   # the relay writes its own pidfile once it holds the lock; wait for that, so
   # nothing (relay --stop, --detach, watch) ever sees a relay half-started
-  local i; for i in $(seq 40); do if relay_running || ! alive "$pid"; then break; fi; sleep 0.05; done
+  local i; for i in $(seq 40); do
+    if [ "$(cat "$RUN/relay.pid" 2>/dev/null || true)" = "$pid" ] || ! alive "$pid"; then break; fi; sleep 0.05
+  done
   echo "RELAY pid=$pid"
 }
