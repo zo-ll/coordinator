@@ -95,6 +95,14 @@ has "$(cat "$(last_batch)")" "t1 died t1.r1.worker pid=$pid timeout"
 kill -0 "$pid" 2>/dev/null && { echo "  timed-out launch still alive"; exit 1; }
 assert "$(state_of t1)" "stalled"
 
+# --- --stop stops this run's relay, and says so when there is none ---
+FAKE_WORKER=exit "$FILO" relay --interval 0.2 >/dev/null 2>&1 &
+wait_for test -s "$REPO/.filo/relay.pid"
+rp=$(cat "$REPO/.filo/relay.pid")
+assert "$("$FILO" relay --stop)" "STOPPED relay pid=$rp"
+kill -0 "$rp" 2>/dev/null && { echo "  relay still alive"; exit 1; }
+assert "$("$FILO" relay --stop)" "RELAY none running"
+
 # --- --detach restarts this run's relay once, and only once ---
 echo "sess-1" > "$REPO/.filo/session"
 out="$("$FILO" relay --detach)"

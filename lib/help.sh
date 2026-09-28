@@ -182,6 +182,7 @@ EOF
     relay) cat <<'EOF'
 filo relay [--once] [--interval N] [--max-attempts N] [--backoff N]   (started by init)
 filo relay --detach   restart this run's relay in the background, unless one is alive
+filo relay --stop     stop this run's relay (a coordinator turn in flight finishes)
 EOF
     ;;
     cfg) echo 'filo cfg get|set|unset|keys <file> ...   flat key=value config' ;;

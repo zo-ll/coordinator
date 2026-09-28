@@ -257,6 +257,18 @@ artifacts_ignored() {
   printf '\n# filo: build artifacts, never part of a change\n%s\n' "$ARTIFACTS" >> "$f"
 }
 
+# excluded <pattern>: ignore a path in this clone only (.git/info/exclude,
+# shared by its worktrees, never committed)
+excluded() {
+  local f
+  f=$(git -C "$REPO" rev-parse --git-common-dir 2>/dev/null) || return 0
+  case $f in /*) ;; *) f="$REPO/$f" ;; esac
+  f="$f/info/exclude"
+  grep -qxF -- "$1" "$f" 2>/dev/null && return 0
+  mkdir -p "$(dirname "$f")"
+  printf '%s\n' "$1" >> "$f"
+}
+
 # critic_brief <round> <worker brief>: the critic's assignment, composed from
 # the worker brief's criteria only; CONTEXT and other coordinator prose never
 # reach the critic.
@@ -672,13 +684,22 @@ merge_locked() {
 # The scheduler: the only thing that turns events into coordinator turns.
 #   relay [--once] [--interval N] [--max-attempts N] [--backoff N]
 #   relay --detach   (re)start this run's relay in the background -> RELAY pid=<pid>
+#   relay --stop     stop it -> STOPPED relay pid=<pid> | RELAY none running
 # One relay per run. Each tick: report launches that died (exited) or ran
 # past their timebox (SIGTERM, SIGKILL after timebox.grace, then died
 # timeout; a second death in a round blocks the unit); then write every
 # undelivered wake event into one batch file, claim it, resume the
 # coordinator with "WAKE batch=<path>", and ack when its turn exits.
 cmd_relay() {
-  parse_args relay "interval max-attempts backoff" "" "once detach" "$@"
+  parse_args relay "interval max-attempts backoff" "" "once detach stop" "$@"
+  if [ "${F[stop]:-0}" = 1 ]; then   # the relay alone: a coordinator turn in flight finishes on its own
+    local rp i; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
+    alive "$rp" || { echo "RELAY none running"; return 0; }
+    kill -TERM "$rp" 2>/dev/null || true
+    for i in $(seq 50); do alive "$rp" || break; sleep 0.1; done
+    alive "$rp" && { fail 1 'relay: pid %s did not stop' "$rp"; return; }
+    echo "STOPPED relay pid=$rp"; return 0
+  fi
   if [ "${F[detach]:-0}" = 1 ]; then   # (re)start this run's relay in the background
     local rp; rp=$(cat "$RUN/relay.pid" 2>/dev/null || true)
     if alive "$rp"; then echo "RELAY pid=$rp (already running)"; return 0; fi
@@ -983,22 +1004,21 @@ cmd_start() {
   [ -f "$LOG" ] || : > "$LOG"
   echo "SESSION $sid source=$src harness=$harness repo=$REPO"
 
-  # repo hygiene: run state is never committed; the first commit the
-  # coordinator authors in the run
-  if [ ! -f "$RUN/.gitignore" ]; then
-    printf '%s\n' "$RUN_IGNORE" > "$RUN/.gitignore"
-    hygiene_commit "$REPO" "${RUN#"$REPO"/}/.gitignore" "[filo] ignore run state in .filo/"
-  fi
+  # repo hygiene, never committed: filo commits only reviewed work. Run state
+  # is ignored by .filo/.gitignore, which leaves the user's choices
+  # (config.conf, standing.md, playbooks/) for them to commit, or not
+  [ -f "$RUN/.gitignore" ] || printf '%s\n' "$RUN_IGNORE" > "$RUN/.gitignore"
   # claude grants permissions per process and per directory: a project
   # settings file with bypassPermissions gives every claude in the repo the
-  # worker policy (full permissions), uniformly
+  # worker policy (full permissions), uniformly. It stays in this clone:
+  # excluded locally, never committed, so nobody who clones inherits it
   cs="$REPO/.claude/settings.local.json"
   if [ -f "$cs" ]; then
     grep -q bypassPermissions "$cs" || echo "start: claude settings exist without bypassPermissions: $cs (merge policy requires full worker perms)" >&2
   elif [ ! -e "$cs" ]; then
     mkdir -p "$(dirname "$cs")"
     printf '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  }\n}\n' > "$cs"
-    hygiene_commit "$REPO" .claude/settings.local.json "[filo] claude full permissions"
+    excluded /.claude/settings.local.json
   fi
 
   [ "${F[no-relay]:-0}" = 1 ] && return 0

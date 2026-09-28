@@ -9,20 +9,23 @@ printf 'current=codex\nharness.codex.resume=codex|exec|resume|__SESSION__|__BATC
 cd "$REPO"
 printf 'user work\n' > staged.txt
 git add staged.txt
+head0=$(git rev-parse HEAD)
 
 out="$("$FILO" start --session test-sess --no-relay)"
 assert "$out" "SESSION test-sess source=user harness=codex repo=$REPO"
 assert "$(cat .filo/session)" "test-sess"
 assert "$(git diff --cached --name-only)" "staged.txt"
 if git show HEAD:staged.txt >/dev/null 2>&1; then echo "  boot committed unrelated staged work"; exit 1; fi
-# run state is ignored, committed choices are not
-git log --oneline | grep -q 'ignore run state in .filo/' || { echo "  .filo/.gitignore not committed"; exit 1; }
+# filo commits nothing on setup: run state is ignored, the user's choices are not
+assert "$(git rev-parse HEAD)" "$head0"
 git check-ignore -q .filo/events.log || { echo "  event log not ignored"; exit 1; }
 git check-ignore -q .filo/worktrees/x/file || { echo "  worktrees not ignored"; exit 1; }
 if git check-ignore -q .filo/config.conf; then echo "  config.conf ignored"; exit 1; fi
 if git check-ignore -q .filo/playbooks/feature.md; then echo "  playbooks ignored"; exit 1; fi
 grep -q bypassPermissions .claude/settings.local.json || { echo "  claude settings missing"; exit 1; }
-assert "$(git show --pretty=format: --name-only HEAD | sed '/^$/d')" ".claude/settings.local.json"
+git check-ignore -q .claude/settings.local.json || { echo "  claude settings not excluded"; exit 1; }   # this clone only
+assert "$(git status --porcelain --untracked-files=all | grep -v staged.txt)" $'?? .filo/.gitignore\n?? .filo/config.conf'   # only what's yours to commit
+grep -qxF /.claude/settings.local.json "$(git rev-parse --git-common-dir)/info/exclude"
 
 # starts a detached relay for this run, pinning the resume recipe
 out="$("$FILO" start --session s2)"

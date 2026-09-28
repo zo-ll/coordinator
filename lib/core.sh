@@ -167,16 +167,6 @@ identity() {
   [ -n "$ID_NAME" ] || ID_NAME=filo
 }
 
-# hygiene_commit <repo> <path> <message>: force-add only this path and commit
-# only this path with the user's identity if it changed. Never fatal.
-hygiene_commit() {
-  git -C "$1" rev-parse --verify --quiet HEAD >/dev/null 2>&1 || return 0
-  identity "$1"
-  git -C "$1" add -f -- "$2" 2>/dev/null || return 0
-  [ -n "$(git -C "$1" status --porcelain -- "$2" 2>/dev/null)" ] || return 0
-  git -C "$1" -c user.email="$ID_EMAIL" -c user.name="$ID_NAME" commit -q --only -m "$3" -- "$2" >/dev/null 2>&1 || true
-}
-
 # state_hash <worktree>: SHA-256 of the whole working tree (tracked changes
 # and untracked, non-ignored files, outside .scratch/) against HEAD, through a
 # throwaway index so it never depends on, or touches, what was staged.

@@ -16,7 +16,9 @@ Multi-agent protocol for producing software. See [SPEC.md](SPEC.md).
   ignored). Every write goes through `commit` in `lib/core.sh`, which checks it
   against `lib/model.awk`; unit and delivery state are projections of the log.
 - Everything a run creates lives in `<repo>/.filo/`; only `config.conf`,
-  `standing.md`, and `playbooks/` there are committed.
+  `standing.md`, and `playbooks/` there are meant to be committed, by the
+  user. filo itself commits only reviewed work (a unit's commit and its
+  merge), never setup.
 - If the CLI can say it or enforce it, it does not go in `SKILL.md`: shape
   (fields, rounds, transitions, evidence, timeouts, what to do next) belongs
   in code with a test and in `filo help`; `SKILL.md`, `agents/`, and

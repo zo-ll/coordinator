@@ -95,9 +95,9 @@ Everything a run creates lives in `<repo>/.filo/`:
 | Path | Contents | Writer |
 |---|---|---|
 | `events.log` | append-only event log, the source of truth, including delivery state | `filo` under `events.log.lock` |
-| `config.conf` | repo choices (v1 format, committed) | `filo init` |
-| `standing.md` | standing orders (committed) | `filo standing add` |
-| `playbooks/*.md` | repo playbook overrides (committed) | the user |
+| `config.conf` | repo choices (v1 format, yours to commit) | `filo init` |
+| `standing.md` | standing orders (yours to commit) | `filo standing add` |
+| `playbooks/*.md` | repo playbook overrides (yours to commit) | the user |
 | `.gitignore` | ignores everything here except the three above | `filo init` |
 | `session` | coordinator session id | `filo init` |
 | `gates.tsv` | gates: id, status, question, options, default, answer | `filo gate` |
