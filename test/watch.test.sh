@@ -195,12 +195,14 @@ out="$(view strict)"
 has "$out" " Merge of round 1  "; has "$out" "✗ failed · exit 1"; has "$out" '$ test "$(wc -l < file.txt)" -gt 99'
 has "$out" "exit 1 · sent back to the worker at"
 has "$(view strict --tab findings)" "✗ the merge re-ran the checks: exit 1 (see 4 log)"
+FAKE_WORKER=sleep "$FILO" dispatch strict --role worker --brief "$TMP/strict" >/dev/null   # round 2 starts: the failure still shows
+out="$(view strict --tab log)"; has "$out" " Merge of round 1  "; has "$out" "✗ failed · exit 1"
 touch -d '+5 seconds' .filo/log/strict.verify.log                     # a new merge rewrote the log
 has "$(view strict --tab log)" " Merge  running"
 
 # DEL and C1 controls in event text never reach the terminal
-"$FILO" msg strict $'odd\x7f\xc2\x9b31m text' >/dev/null
-out="$(frame 80)"; has "$out" "odd31m text"; hasnt "$out" $'\xc2\x9b'
+"$FILO" msg strict $'odd\x7f\xc2\x9b31m text\x1fend' >/dev/null
+out="$(frame 80)"; has "$out" "odd31m text end"; hasnt "$out" $'\xc2\x9b'; hasnt "$out" $'\x1f'
 has "$(view strict --tab history)" "odd"; hasnt "$(view strict --tab history)" $'\x7f'
 
 # an agent restarted after a death: its output tab says running, not the old death

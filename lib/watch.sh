@@ -433,7 +433,7 @@ EV_AWK='
   }
   BEGIN { split(evl, g, ","); EVL["none"] = g[1]; EVL["typecheck"] = g[2]; EVL["tests"] = g[3]; EVL["live"] = g[4] }
   !parse() || E["unit"] != id { next }
-  { for (k in E) E[k] = q(E[k]) }
+  { shown() }
   { t = E["type"] }
 '
 ev_awk() { local id=$1 prog=$2; shift 2; unc1 "$LOG" | awk -v id="$id" -v w="$W_W" -v evl="$EVL_none,$EVL_typecheck,$EVL_tests,$EVL_live" "$@" -f "$EVENTS" -f <(printf '%s' "$EV_AWK$prog"); }

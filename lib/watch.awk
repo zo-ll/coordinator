@@ -14,7 +14,7 @@ function feed(s) { print "F\t" int(E["ts"]) "\t" s; SENT[E["seq"]] = s }
 
 {
     if (!parse()) next
-    for (k in E) E[k] = q(E[k])
+    shown()
     t = E["type"]; u = E["unit"]
     if (!started) { print "S\t" int(E["ts"]); started = 1 }
 

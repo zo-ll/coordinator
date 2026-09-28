@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# filo plan + apply: proposal/ask split, single-harness forcing, validation.
+# libexec/plan.sh + apply.sh (filo init's proposal): the proposal/ask split,
+# single-harness forcing, validation.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 filo_plan() { "$ROOT/libexec/plan.sh" "$@"; }

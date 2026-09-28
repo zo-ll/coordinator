@@ -350,8 +350,9 @@ reference, so SKILL.md does not repeat flags or output formats.
   `standing`, `status`, `log`.
 - Role agents: `finish`, the only way a worker, critic, or researcher reports
   and wakes the coordinator.
-- Plumbing, used by `init` and the relay: `detect`, `plan`, `apply`, `start`,
-  `relay`, `cfg`, `unit next`, `done`.
+- Plumbing, used by `init` and the relay: `start`, `relay`, `cfg`,
+  `unit next`, `done` (init's detect, plan and apply are scripts in
+  `libexec/`).
 
 ### Watch
 

@@ -957,9 +957,9 @@ cmd_done() {
 cmd_init() {
   parse_args init "answers harness session" "" "accept" "$@"
   local x=$SKILL/libexec a=()
-  FILO_CONFIG=$CONFIG "$x/detect.sh" || return
+  "$x/detect.sh" || return
   if [ ! -f "$CONFIG" ]; then
-    FILO_CONFIG=$CONFIG "$x/plan.sh" || return
+    "$x/plan.sh" || return
     if [ -n "${F[answers]:-}" ]; then FILO_CONFIG=$CONFIG "$x/apply.sh" --answers "${F[answers]}" || return
     elif [ "${F[accept]:-0}" = 1 ]; then FILO_CONFIG=$CONFIG "$x/apply.sh" --accept || return
     else
@@ -993,7 +993,7 @@ cmd_start() {
   parse_args start "harness session" "" "no-relay" "$@"
   local harness=${F[harness]:-} sid=${F[session]:-} src="" f base rec pid cs
   [ -n "$harness" ] || harness=$(cfg_val "$ENV_CONF" current)
-  [ -n "$harness" ] || { fail 1 'start: no current harness (run filo detect first)'; return; }
+  [ -n "$harness" ] || { fail 1 'start: no current harness (run filo init first)'; return; }
   if [ -n "$sid" ]; then src=user
   elif [ -n "${FILO_SESSION:-}" ]; then sid=$FILO_SESSION src=env
   else
