@@ -429,8 +429,15 @@ read_key() {
   while IFS= read -rsn1 -u "$1" -t 0.01 c; do
     s+=$c; case $c in [A-Za-z~]) break ;; esac; [ "${#s}" -lt 24 ] || break
   done
+  # a terminal with mouse mode but not SGR sends ESC [ M and three raw bytes:
+  # read them here, or they would land as keys (wheel-down is "a")
+  [ "$s" != M ] || IFS= read -rsn3 -u "$1" -t 0.01 c || true
   case $s in A) KEY=UP ;; B) KEY=DOWN ;; '<'*[Mm]) KEY="M:${s#<}" ;; *) KEY=NONE ;; esac
 }
+
+# drain: drop input queued while a slow action ran (a second click, a key
+# pressed twice), so it can't act on whatever is selected afterwards
+drain() { local c; [ "$W_LIVE" != 1 ] || while IFS= read -rsn1 -t 0.05 c; do :; done; }
 
 # mouse <M:b;x;y[Mm]>: MB MX MY for a press (b 0 left, 64/65 wheel up/down);
 # fails on a release or any other button
@@ -446,9 +453,14 @@ mouse() {
 ask() {
   local p=$1 text="" line shown room act r
   ANSWER=""; r="$(m k '✓ send')  $(m k '✗ cancel') "
+  # the targets never get cut: on a narrow screen the prompt gives way
+  room=$(( W_W - $(vis "$r") - 2 )); [ "$(vis "$p")" -le "$room" ] || p=$(fit "$p" "$room")
   while :; do
     room=$(( W_W - $(vis "$p") - $(vis "$r") - 1 )); [ "$room" -ge 1 ] || room=1
-    shown=$(clean "$text"); [ "${#shown}" -le "$room" ] || shown="…${shown: -$((room - 1))}"
+    shown=$(clean "$text")
+    if [ "${#shown}" -gt "$room" ]; then
+      if [ "$room" -lt 2 ]; then shown=…; else shown="…${shown: -$((room - 1))}"; fi
+    fi
     line=$(lr "$p$shown" "$r" "$W_W")
     mapfile -t REPLY_HIT < <(hits "$line" k)
     [ "$W_LIVE" != 1 ] || printf '\e[%d;1H\e[2K%s\e[%d;%dH\e[?25h' $((W_H - 1)) "$(ansi "$(fit "$line" "$W_W")")" \
@@ -579,7 +591,7 @@ on_key() {
     k|UP)          [ "${#ITEMS[@]}" -eq 0 ] || SEL=$(( (SEL + ${#ITEMS[@]} - 1) % ${#ITEMS[@]} )) ;;
     a) if [ "$kind" = unit ] && [ "${STATE[$id]}" = passed ]; then
          W_REPLY=" $(m d ›) approving $id, then merging (re-running its checks)…"; [ "$W_LIVE" != 1 ] || draw
-         run approve "$id" && run merge "$id"
+         run approve "$id" && run merge "$id"; drain
        fi ;;
     r) if [ "$kind" = unit ] && [ "${STATE[$id]}" = passed ]; then
          ask "$(m y "send $id back ›") "; [ -z "$ANSWER" ] || run reject "$id" "$ANSWER"

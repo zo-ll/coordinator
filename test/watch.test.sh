@@ -71,6 +71,13 @@ has "$(PAGER='head -n1' frame 80 --press "$(click "$(col_of "$bar" '? keys')" 70
 has "$(frame 80 --press "$(click 3 "$r" 65)$(click 3 "$r" 65)")" "▸◐ busy1"  # wheel moves the selection
 has "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)")" "↑ 1 newer" # and scrolls the feed
 hasnt "$(frame 80 --press "$(click 3 "$(row_of '─ RECENT')" 65)$(click 3 "$(row_of '─ RECENT')" 64)")" "newer"
+# a terminal without SGR sends ESC [ M and three raw bytes: never keys
+# (wheel-down's button byte is "a")
+frame 80 --press $'\e[Ma!!' >/dev/null; assert "$(state_of pass1)" passed
+# a narrow prompt keeps its ✓ send / ✗ cancel targets: cancel, then ↵ would drop
+{ printf 'yes'; click 40 69; echo; } | "$COORD" watch --once --width 44 --height 70 \
+  --press "$(click "$(col_of "$need" dead1)" "$(row_of 'needs you')")x" >/dev/null
+assert "$(state_of dead1)" blocked
 # prompts: typed, with ✓ send / ✗ cancel on the reply row (row 69)
 { printf 'no'; click 75 69; echo; } | frame 80 --press m >/dev/null; hasnt "$("$COORD" log)" "msg - no"
 { printf 'drop\e'; } | frame 80 --press m >/dev/null; hasnt "$("$COORD" log)" "msg - drop"   # esc cancels
